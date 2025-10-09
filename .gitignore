@@ -1,0 +1,22 @@
+# Sanal Ortamlar
+venv/
+onmuhasebe_venv/
+
+# Python Bytecode Dosyaları
+__pycache__/
+*.pyc
+
+# Log Dosyaları
+*.log
+data/*.log
+data/*.db_backup
+
+# IDE (Entegre Geliştirme Ortamı) Dosyaları
+.vscode/
+.idea/
+*.iml
+
+# Diğer Geçici Dosyalar
+*.swp
+*~
+.DS_Store
