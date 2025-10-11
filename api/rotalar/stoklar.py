@@ -1,15 +1,15 @@
-# api/rotalar/stoklar.py dosyasının tam içeriği (Hata Çözümü Uygulandı)
+# api/rotalar/stoklar.py dosyasının TAMAMI (Database-per-Tenant ve Temizlik Uygulandı)
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload # <<< KRİTİK EKLEME: joinedload eklendi
+from sqlalchemy.orm import Session, joinedload 
 from sqlalchemy import func, and_, or_
-from .. import modeller, semalar, guvenlik
-from ..veritabani import get_db
+from .. import modeller, guvenlik 
+# KRİTİK DÜZELTME 1: Tenant DB'ye dinamik bağlanacak yeni bağımlılık kullanıldı.
+from ..veritabani import get_db as get_tenant_db
 from typing import List, Optional, Any
 from datetime import datetime, date
-from sqlalchemy import String
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-# DEĞİŞİKLİK: Doğru içe aktarma yolu kullanıldı
-from hizmetler import FaturaService
+# DEĞİŞİKLİK: CariHesaplamaService'in çağrılabilmesi için dışarıdan import edildiği varsayılır.
+# Bu rota FaturaService'i doğrudan kullanmadığı için bu import kaldırılmıştır.
 import logging
 from ..guvenlik import get_current_user
 
@@ -17,15 +17,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stoklar", tags=["Stoklar"])
 
+# KRİTİK DÜZELTME 2: Tenant DB bağlantısı için kullanılacak bağımlılık
+TENANT_DB_DEPENDENCY = get_tenant_db
+
 
 @router.post("/", response_model=modeller.StokRead)
 def create_stok(
     stok: modeller.StokCreate,
-    current_user: semalar.Kullanici = Depends(guvenlik.get_current_user),
-    db: Session = Depends(get_db)
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
+    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
 ):
     try:
-        # model_dump()'tan 'kullanici_id' hariç tutuldu. 
         stok_data = stok.model_dump(exclude={'kullanici_id', 'id'})
         
         # KRİTİK DÜZELTME: Nitelik ID'lerini -1'den None'a çevirme (ForeignKeyViolation'ı çözmek için)
@@ -33,25 +35,30 @@ def create_stok(
             if stok_data.get(field) == -1:
                 stok_data[field] = None
         
-        db_stok = modeller.Stok(**stok_data, kullanici_id=current_user.id)
+        # KRİTİK DÜZELTME 3: Tenant DB'de Kurucu Personelin ID'si her zaman 1'dir.
+        db_stok = modeller.Stok(**stok_data, kullanici_id=1)
         
         db.add(db_stok)
         db.commit()
         db.refresh(db_stok)
         
         # Stok hareketi eklenir (İlk Giriş)
-        # Sadece yeni ürün ekleniyorsa ilk stok miktarını ekle
         if stok.miktar and stok.miktar > 0:
-             modeller.StokHareket.create_stok_hareket(
-                db, 
+             db_hareket = modeller.StokHareket(
                 urun_id=db_stok.id, 
-                islem_tipi=modeller.OnMuhasebe.STOK_ISLEM_TIP_GIRIS_MANUEL, 
+                islem_tipi=modeller.StokIslemTipiEnum.GIRIS,
                 miktar=stok.miktar, 
+                birim_fiyat=stok.alis_fiyati,
                 aciklama="İlk Stok Girişi", 
-                kaynak="MANUEL", 
-                kullanici_id=current_user.id
+                kaynak=modeller.KaynakTipEnum.MANUEL.value,
+                onceki_stok=0.0,
+                sonraki_stok=stok.miktar,
+                kullanici_id=1 # KRİTİK DÜZELTME 4: Tenant DB ID'si 1 kullanılır
              )
-        
+             db.add(db_hareket)
+             db.commit()
+             db.refresh(db_stok)
+
         return modeller.StokRead.model_validate(db_stok, from_attributes=True)
     
     except IntegrityError as e:
@@ -74,38 +81,39 @@ def read_stoklar(
     marka_id: Optional[int] = None,
     urun_grubu_id: Optional[int] = None,
     stokta_var: Optional[bool] = None,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    query = db.query(modeller.Stok).filter(modeller.Stok.kullanici_id == current_user.id) # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
+    query = db.query(modeller.Stok)
     
     if arama:
         search_filter = or_(
-            modeller.Stok.kod.ilike(f"%{arama}%"), # DÜZELTME: modeller.Stok kullanıldı
-            modeller.Stok.ad.ilike(f"%{arama}%") # DÜZELTME: modeller.Stok kullanıldı
+            modeller.Stok.kod.ilike(f"%{arama}%"),
+            modeller.Stok.ad.ilike(f"%{arama}%")
         )
         query = query.filter(search_filter)
 
     if aktif_durum is not None:
-        query = query.filter(modeller.Stok.aktif == aktif_durum) # DÜZELTME: modeller.Stok kullanıldı
+        query = query.filter(modeller.Stok.aktif == aktif_durum)
 
     if kritik_stok_altinda:
-        query = query.filter(modeller.Stok.miktar <= modeller.Stok.min_stok_seviyesi) # DÜZELTME: modeller.Stok kullanıldı
+        query = query.filter(modeller.Stok.miktar <= modeller.Stok.min_stok_seviyesi)
 
     if kategori_id:
-        query = query.filter(modeller.Stok.kategori_id == kategori_id) # DÜZELTME: modeller.Stok kullanıldı
+        query = query.filter(modeller.Stok.kategori_id == kategori_id)
 
     if marka_id:
-        query = query.filter(modeller.Stok.marka_id == marka_id) # DÜZELTME: modeller.Stok kullanıldı
+        query = query.filter(modeller.Stok.marka_id == marka_id)
 
     if urun_grubu_id:
-        query = query.filter(modeller.Stok.urun_grubu_id == urun_grubu_id) # DÜZELTME: modeller.Stok kullanıldı
+        query = query.filter(modeller.Stok.urun_grubu_id == urun_grubu_id)
 
     if stokta_var is not None:
         if stokta_var:
-            query = query.filter(modeller.Stok.miktar > 0) # DÜZELTME: modeller.Stok kullanıldı
+            query = query.filter(modeller.Stok.miktar > 0)
         else:
-            query = query.filter(modeller.Stok.miktar <= 0) # DÜZELTME: modeller.Stok kullanıldı
+            query = query.filter(modeller.Stok.miktar <= 0)
 
     total_count = query.count()
     
@@ -118,16 +126,17 @@ def read_stoklar(
 
 @router.get("/ozet", response_model=modeller.StokOzetResponse)
 def get_stok_ozet(
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    query = db.query(modeller.Stok).filter(modeller.Stok.kullanici_id == current_user.id) # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
+    query = db.query(modeller.Stok)
     
-    toplam_miktar = query.with_entities(func.sum(modeller.Stok.miktar)).scalar() or 0 # DÜZELTME: modeller.Stok kullanıldı
-    toplam_alis_fiyati = query.with_entities(func.sum(modeller.Stok.alis_fiyati * modeller.Stok.miktar)).scalar() or 0 # DÜZELTME: modeller.Stok kullanıldı
-    toplam_satis_fiyati = query.with_entities(func.sum(modeller.Stok.satis_fiyati * modeller.Stok.miktar)).scalar() or 0 # DÜZELTME: modeller.Stok kullanıldı
+    toplam_miktar = query.with_entities(func.sum(modeller.Stok.miktar)).scalar() or 0
+    toplam_alis_fiyati = query.with_entities(func.sum(modeller.Stok.alis_fiyati * modeller.Stok.miktar)).scalar() or 0
+    toplam_satis_fiyati = query.with_entities(func.sum(modeller.Stok.satis_fiyati * modeller.Stok.miktar)).scalar() or 0
     
-    toplam_urun_sayisi = query.filter(modeller.Stok.aktif == True).count() # DÜZELTME: modeller.Stok kullanıldı
+    toplam_urun_sayisi = query.filter(modeller.Stok.aktif == True).count()
     
     return {
         "toplam_urun_sayisi": toplam_urun_sayisi,
@@ -139,11 +148,10 @@ def get_stok_ozet(
 @router.get("/{stok_id}", response_model=modeller.StokRead)
 def read_stok(
     stok_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    # KRİTİK DÜZELTME: İlişkileri (kategori, marka, grup, birim, mense) sorgu anında yükle (joinedload).
-    # Bu, 'AttributeError: 'Stok' object has no attribute 'kategori'' hatasını çözer.
+    # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
     stok = db.query(modeller.Stok).options(
         joinedload(modeller.Stok.kategori),
         joinedload(modeller.Stok.marka),
@@ -151,17 +159,16 @@ def read_stok(
         joinedload(modeller.Stok.birim),
         joinedload(modeller.Stok.mense_ulke)
     ).filter(
-        modeller.Stok.id == stok_id,
-        modeller.Stok.kullanici_id == current_user.id
+        modeller.Stok.id == stok_id
     ).first()
     
     if not stok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı")
     
-    # Pydantic modeline dönüştürme
+    # Pydantic modeline dönüştürme ve İlişkili Nitelik Verilerini StokRead modeline ekle
     stok_read_data = modeller.StokRead.model_validate(stok, from_attributes=True).model_dump()
     
-    # İlişkili Nitelik Verilerini StokRead modeline ekle (Kontrol mekanizması korundu)
+    # Nitelik okumaları (Bu kısım DbT'den etkilenmez, sadece doğru modelin kullanıldığından emin olunur)
     if hasattr(stok, 'kategori') and stok.kategori:
         stok_read_data['kategori'] = modeller.UrunKategoriRead.model_validate(stok.kategori, from_attributes=True).model_dump()
     if hasattr(stok, 'marka') and stok.marka:
@@ -179,12 +186,12 @@ def read_stok(
 def update_stok(
     stok_id: int,
     stok: modeller.StokUpdate,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    db_stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.id == stok_id, # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
+    db_stok = db.query(modeller.Stok).filter(
+        modeller.Stok.id == stok_id
     ).first()
     if not db_stok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı")
@@ -197,12 +204,12 @@ def update_stok(
 @router.delete("/{stok_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stok(
     stok_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    db_stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.id == stok_id, # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 9: IZOLASYON FILTRESI KALDIRILDI!
+    db_stok = db.query(modeller.Stok).filter(
+        modeller.Stok.id == stok_id
     ).first()
     if not db_stok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı")
@@ -213,12 +220,12 @@ def delete_stok(
 @router.get("/{stok_id}/anlik_miktar", response_model=modeller.AnlikStokMiktariResponse)
 def get_anlik_stok_miktari_endpoint(
     stok_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.id == stok_id, # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 10: IZOLASYON FILTRESI KALDIRILDI!
+    stok = db.query(modeller.Stok).filter(
+        modeller.Stok.id == stok_id
     ).first()
     if not stok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı")
@@ -229,12 +236,12 @@ def get_anlik_stok_miktari_endpoint(
 def create_stok_hareket(
     stok_id: int,
     hareket: modeller.StokHareketCreate,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    db_stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.id == stok_id, # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 11: IZOLASYON FILTRESI KALDIRILDI!
+    db_stok = db.query(modeller.Stok).filter(
+        modeller.Stok.id == stok_id
     ).first()
     if not db_stok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı.")
@@ -246,21 +253,18 @@ def create_stok_hareket(
 
     try:
         stok_degisim_net = 0.0
-        # semalar.StokIslemTipiEnum yerine modeller.StokIslemTipiEnum kullanılmalı, ancak Enum importu semalar'dan yapıldığı için semalar.StokIslemTipiEnum olarak tutuldu.
-        # Not: Buradaki Enum adları, modeller.py dosyasındaki Enumlara karşılık gelmelidir.
         if hareket.islem_tipi in [
-            semalar.StokIslemTipiEnum.GIRIS,
-            semalar.StokIslemTipiEnum.SAYIM_FAZLASI,
-            semalar.StokIslemTipiEnum.SATIŞ_İADE,
-            semalar.StokIslemTipiEnum.ALIŞ
+            modeller.StokIslemTipiEnum.GIRIS,
+            modeller.StokIslemTipiEnum.SAYIM_FAZLASI,
+            modeller.StokIslemTipiEnum.SATIŞ_İADE,
+            modeller.StokIslemTipiEnum.ALIŞ
         ]:
             stok_degisim_net = hareket.miktar
         elif hareket.islem_tipi in [
-            semalar.StokIslemTipiEnum.CIKIS, # CIKIS'a düzeltildi
-            semalar.StokIslemTipiEnum.SAYIM_EKSİĞİ,
-            # semalar.StokIslemTipiEnum.ZAYIAT, # Enum'da yoksa çıkarıldı
-            semalar.StokIslemTipiEnum.SATIŞ,
-            semalar.StokIslemTipiEnum.ALIŞ_İADE
+            modeller.StokIslemTipiEnum.CIKIS,
+            modeller.StokIslemTipiEnum.SAYIM_EKSİĞİ,
+            modeller.StokIslemTipiEnum.SATIŞ,
+            modeller.StokIslemTipiEnum.ALIŞ_İADE
         ]:
             stok_degisim_net = -hareket.miktar
         else:
@@ -271,18 +275,18 @@ def create_stok_hareket(
         db_stok.miktar += stok_degisim_net
         db.add(db_stok)
 
-        db_hareket = modeller.StokHareket( # DÜZELTME: modeller.StokHareket kullanıldı
-            urun_id=stok_id, # DÜZELTME: kolon adı urun_id olarak değiştirildi
+        db_hareket = modeller.StokHareket(
+            urun_id=stok_id,
             tarih=hareket.tarih,
             islem_tipi=hareket.islem_tipi,
             miktar=hareket.miktar,
             birim_fiyat=hareket.birim_fiyat,
             aciklama=hareket.aciklama,
-            kaynak=semalar.KaynakTipEnum.MANUEL,
+            kaynak=modeller.KaynakTipEnum.MANUEL,
             kaynak_id=None,
             onceki_stok=onceki_stok_miktari,
             sonraki_stok=db_stok.miktar,
-            kullanici_id=current_user.id
+            kullanici_id=1 # KRİTİK DÜZELTME 12: Tenant DB ID'si 1 kullanılır
         )
         db.add(db_hareket)
 
@@ -302,15 +306,13 @@ def get_stok_hareketleri_endpoint(
     islem_tipi: str = Query(None),
     baslangic_tarihi: str = Query(None),
     bitis_tarihi: str = Query(None),
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    kullanici_id = current_user.id
-    # MODEL TUTARLILIĞI DÜZELTME: semalar.StokHareket -> modeller.StokHareket
-    query = db.query(modeller.StokHareket).filter(modeller.StokHareket.kullanici_id == kullanici_id)
+    # KRİTİK DÜZELTME 13: IZOLASYON FILTRESI KALDIRILDI!
+    query = db.query(modeller.StokHareket)
 
     if stok_id:
-        # KRİTİK DÜZELTME: Yanlış kolon 'stok_id' yerine doğru kolon 'urun_id' kullanıldı.
         query = query.filter(modeller.StokHareket.urun_id == stok_id)
     if islem_tipi:
         query = query.filter(modeller.StokHareket.islem_tipi == islem_tipi)
@@ -330,14 +332,14 @@ def get_stok_hareketleri_endpoint(
 @router.delete("/hareketler/{hareket_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stok_hareket(
     hareket_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    db_hareket = db.query(modeller.StokHareket).filter( # DÜZELTME: modeller.StokHareket kullanıldı
+    # KRİTİK DÜZELTME 14: IZOLASYON FILTRESI KALDIRILDI!
+    db_hareket = db.query(modeller.StokHareket).filter(
         and_(
-            modeller.StokHareket.id == hareket_id, # DÜZELTME: modeller.StokHareket kullanıldı
-            modeller.StokHareket.kaynak == semalar.KaynakTipEnum.MANUEL, # DÜZELTME: modeller.StokHareket kullanıldı
-            modeller.StokHareket.kullanici_id == current_user.id # DÜZELTME: modeller.StokHareket kullanıldı
+            modeller.StokHareket.id == hareket_id,
+            modeller.StokHareket.kaynak == modeller.KaynakTipEnum.MANUEL
         )
     ).first()
 
@@ -347,15 +349,15 @@ def delete_stok_hareket(
             detail="Stok hareketi bulunamadı veya manuel olarak silinemez (otomatik oluşturulmuştur)."
         )
     
-    stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-        modeller.Stok.id == db_hareket.urun_id, # DÜZELTME: urun_id kullanıldı
-        modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+    # KRİTİK DÜZELTME 15: IZOLASYON FILTRESI KALDIRILDI!
+    stok = db.query(modeller.Stok).filter(
+        modeller.Stok.id == db_hareket.urun_id
     ).first()
     if stok:
         # Geri alma mantığı düzeltildi
-        if db_hareket.islem_tipi in [semalar.StokIslemTipiEnum.GIRIS, semalar.StokIslemTipiEnum.SAYIM_FAZLASI, semalar.StokIslemTipiEnum.ALIŞ, semalar.StokIslemTipiEnum.SATIŞ_İADE]:
+        if db_hareket.islem_tipi in [modeller.StokIslemTipiEnum.GIRIS, modeller.StokIslemTipiEnum.SAYIM_FAZLASI, modeller.StokIslemTipiEnum.ALIŞ, modeller.StokIslemTipiEnum.SATIŞ_İADE]:
             stok.miktar -= db_hareket.miktar
-        elif db_hareket.islem_tipi in [semalar.StokIslemTipiEnum.CIKIS, semalar.StokIslemTipiEnum.SAYIM_EKSİĞİ, semalar.StokIslemTipiEnum.SATIŞ, semalar.StokIslemTipiEnum.ALIŞ_İADE]:
+        elif db_hareket.islem_tipi in [modeller.StokIslemTipiEnum.CIKIS, modeller.StokIslemTipiEnum.SAYIM_EKSİĞİ, modeller.StokIslemTipiEnum.SATIŞ, modeller.StokIslemTipiEnum.ALIŞ_İADE]:
             stok.miktar += db_hareket.miktar
         db.add(stok)
     
@@ -366,8 +368,8 @@ def delete_stok_hareket(
 @router.post("/bulk_upsert", response_model=modeller.TopluIslemSonucResponse)
 def bulk_stok_upsert_endpoint(
     stok_listesi: List[modeller.StokCreate],
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(get_current_user) # DÜZELTME: JWT Kuralı ve doğru tip
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     db.begin_nested()
     try:
@@ -381,9 +383,9 @@ def bulk_stok_upsert_endpoint(
         
         for stok_data in stok_listesi:
             try:
-                db_stok = db.query(modeller.Stok).filter( # DÜZELTME: modeller.Stok kullanıldı
-                    modeller.Stok.kod == stok_data.kod, # DÜZELTME: modeller.Stok kullanıldı
-                    modeller.Stok.kullanici_id == current_user.id # DÜZELTME: modeller.Stok kullanıldı
+                # KRİTİK DÜZELTME 16: IZOLASYON FILTRESI KALDIRILDI!
+                db_stok = db.query(modeller.Stok).filter(
+                    modeller.Stok.kod == stok_data.kod
                 ).first()
                 
                 if db_stok:
@@ -392,13 +394,13 @@ def bulk_stok_upsert_endpoint(
                     db.add(db_stok)
                     guncellenen += 1
                 else:
-                    yeni_stok = modeller.Stok(**stok_data.model_dump(), kullanici_id=current_user.id) # DÜZELTME: modeller.Stok kullanıldı
+                    # KRİTİK DÜZELTME 17: Tenant ID'si 1 kullanılır
+                    yeni_stok = modeller.Stok(**stok_data.model_dump(), kullanici_id=1) 
                     db.add(yeni_stok)
                     db.flush()
                     yeni_eklenen += 1
                     
                     if yeni_stok.miktar != 0:
-                        # Alış fiyatının KDV hariç hali, modeldeki alış fiyatı varsayılır.
                         alis_fiyati_kdv_haric = yeni_stok.alis_fiyati
                         
                         kalem_bilgisi = {
@@ -418,31 +420,32 @@ def bulk_stok_upsert_endpoint(
                 hata_veren += 1
                 hatalar.append(f"Stok kodu '{stok_data.kod}' işlenirken hata: {e}")
 
+        # Fatura ve Hareket Oluşturma Mantığı (Tenant ID'si 1 kullanılır)
         if pozitif_kalemler:
             fatura_no=f"TOPLU-ALIS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            tarih=datetime.now().date() # DÜZELTME: date objesi kullanıldı
+            tarih=datetime.now().date()
             
             toplam_kdv_haric = sum(k['birim_fiyat'] * k['miktar'] for k in pozitif_kalemler)
             toplam_kdv_dahil = sum(k['birim_fiyat'] * (1 + k['kdv_orani'] / 100) * k['miktar'] for k in pozitif_kalemler)
             
-            db_fatura = modeller.Fatura( # DÜZELTME: modeller.Fatura kullanıldı
+            db_fatura = modeller.Fatura(
                 fatura_no=fatura_no,
-                fatura_turu=semalar.FaturaTuruEnum.ALIS,
+                fatura_turu=modeller.FaturaTuruEnum.ALIS,
                 tarih=tarih,
-                cari_id=1,
-                cari_tip=semalar.CariTipiEnum.TEDARIKCI.value,
-                odeme_turu=semalar.OdemeTuruEnum.ETKISIZ_FATURA,
+                cari_id=1, # Varsayılan Tedarikçi ID'si
+                cari_tip=modeller.CariTipiEnum.TEDARIKCI.value,
+                odeme_turu=modeller.OdemeTuruEnum.ETKISIZ_FATURA,
                 fatura_notlari="Toplu stok ekleme işlemiyle otomatik oluşturulan alış faturası.",
                 toplam_kdv_haric=toplam_kdv_haric,
                 toplam_kdv_dahil=toplam_kdv_dahil,
                 genel_toplam=toplam_kdv_dahil,
-                kullanici_id=current_user.id
+                kullanici_id=1 # KRİTİK DÜZELTME 18: Tenant ID'si 1 kullanılır
             )
             db.add(db_fatura)
             db.flush()
 
             for kalem_bilgisi in pozitif_kalemler:
-                db_kalem = modeller.FaturaKalemi( # DÜZELTME: modeller.FaturaKalemi kullanıldı
+                db_kalem = modeller.FaturaKalemi(
                     fatura_id=db_fatura.id,
                     urun_id=kalem_bilgisi['urun_id'],
                     miktar=kalem_bilgisi['miktar'],
@@ -452,20 +455,20 @@ def bulk_stok_upsert_endpoint(
                 )
                 db.add(db_kalem)
                 
-                db_stok = db.query(modeller.Stok).filter(modeller.Stok.id == kalem_bilgisi['urun_id']).first() # DÜZELTME: modeller.Stok kullanıldı
+                db_stok = db.query(modeller.Stok).filter(modeller.Stok.id == kalem_bilgisi['urun_id']).first()
                 if db_stok:
-                    db_stok_hareket = modeller.StokHareket( # DÜZELTME: modeller.StokHareket kullanıldı
+                    db_stok_hareket = modeller.StokHareket(
                         urun_id=kalem_bilgisi['urun_id'],
                         tarih=db_fatura.tarih,
-                        islem_tipi=semalar.StokIslemTipiEnum.ALIŞ,
+                        islem_tipi=modeller.StokIslemTipiEnum.ALIŞ,
                         miktar=kalem_bilgisi['miktar'],
                         birim_fiyat=kalem_bilgisi['birim_fiyat'],
                         aciklama=f"{db_fatura.fatura_no} nolu fatura ({db_fatura.fatura_turu.value})",
-                        kaynak=semalar.KaynakTipEnum.FATURA,
+                        kaynak=modeller.KaynakTipEnum.FATURA,
                         kaynak_id=db_fatura.id,
                         onceki_stok=db_stok.miktar - kalem_bilgisi['miktar'],
                         sonraki_stok=db_stok.miktar,
-                        kullanici_id=current_user.id
+                        kullanici_id=1 # KRİTİK DÜZELTME 19: Tenant ID'si 1 kullanılır
                     )
                     db.add(db_stok_hareket)
 
@@ -476,24 +479,24 @@ def bulk_stok_upsert_endpoint(
             toplam_kdv_haric_iade = sum(k['birim_fiyat'] * abs(k['miktar']) for k in negatif_kalemler)
             toplam_kdv_dahil_iade = sum(k['birim_fiyat'] * (1 + k['kdv_orani'] / 100) * abs(k['miktar']) for k in negatif_kalemler)
             
-            db_fatura_iade = modeller.Fatura( # DÜZELTME: modeller.Fatura kullanıldı
+            db_fatura_iade = modeller.Fatura(
                 fatura_no=fatura_no,
-                fatura_turu=semalar.FaturaTuruEnum.ALIS_IADE,
+                fatura_turu=modeller.FaturaTuruEnum.ALIS_IADE,
                 tarih=tarih,
                 cari_id=1,
-                cari_tip=semalar.CariTipiEnum.TEDARIKCI.value,
-                odeme_turu=semalar.OdemeTuruEnum.ETKISIZ_FATURA,
+                cari_tip=modeller.CariTipiEnum.TEDARIKCI.value,
+                odeme_turu=modeller.OdemeTuruEnum.ETKISIZ_FATURA,
                 fatura_notlari="Toplu stok ekleme işlemiyle otomatik oluşturulan alış iade faturası.",
                 toplam_kdv_haric=toplam_kdv_haric_iade,
                 toplam_kdv_dahil=toplam_kdv_dahil_iade,
                 genel_toplam=toplam_kdv_dahil_iade,
-                kullanici_id=current_user.id
+                kullanici_id=1 # KRİTİK DÜZELTME 20: Tenant ID'si 1 kullanılır
             )
             db.add(db_fatura_iade)
             db.flush()
 
             for kalem_bilgisi in negatif_kalemler:
-                db_kalem = modeller.FaturaKalemi( # DÜZELTME: modeller.FaturaKalemi kullanıldı
+                db_kalem = modeller.FaturaKalemi(
                     fatura_id=db_fatura_iade.id,
                     urun_id=kalem_bilgisi['urun_id'],
                     miktar=abs(kalem_bilgisi['miktar']),
@@ -503,20 +506,20 @@ def bulk_stok_upsert_endpoint(
                 )
                 db.add(db_kalem)
                 
-                db_stok = db.query(modeller.Stok).filter(modeller.Stok.id == kalem_bilgisi['urun_id']).first() # DÜZELTME: modeller.Stok kullanıldı
+                db_stok = db.query(modeller.Stok).filter(modeller.Stok.id == kalem_bilgisi['urun_id']).first()
                 if db_stok:
-                    db_stok_hareket = modeller.StokHareket( # DÜZELTME: modeller.StokHareket kullanıldı
+                    db_stok_hareket = modeller.StokHareket(
                         urun_id=kalem_bilgisi['urun_id'],
                         tarih=db_fatura_iade.tarih,
-                        islem_tipi=semalar.StokIslemTipiEnum.ALIŞ_İADE,
+                        islem_tipi=modeller.StokIslemTipiEnum.ALIŞ_İADE,
                         miktar=abs(kalem_bilgisi['miktar']),
                         birim_fiyat=kalem_bilgisi['birim_fiyat'],
                         aciklama=f"{db_fatura_iade.fatura_no} nolu fatura ({db_fatura_iade.fatura_turu.value})",
-                        kaynak=semalar.KaynakTipEnum.FATURA,
+                        kaynak=modeller.KaynakTipEnum.FATURA,
                         kaynak_id=db_fatura_iade.id,
                         onceki_stok=db_stok.miktar + abs(kalem_bilgisi['miktar']),
                         sonraki_stok=db_stok.miktar,
-                        kullanici_id=current_user.id
+                        kullanici_id=1 # KRİTİK DÜZELTME 21: Tenant ID'si 1 kullanılır
                     )
                     db.add(db_stok_hareket)
 
@@ -539,20 +542,18 @@ def bulk_stok_upsert_endpoint(
 @router.get("/hareketler/", response_model=modeller.StokHareketListResponse)
 def list_stok_hareketleri_endpoint(
     stok_id: Optional[int] = Query(None),
-    islem_tipi: Optional[semalar.StokIslemTipiEnum] = Query(None),
+    islem_tipi: Optional[modeller.StokIslemTipiEnum] = Query(None),
     baslangic_tarihi: Optional[date] = Query(None),
     bitis_tarihi: Optional[date] = Query(None),
     skip: int = 0,
     limit: int = 1000,
-    db: Session = Depends(get_db),
+    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    kullanici_id = current_user.id
-    # MODEL TUTARLILIĞI DÜZELTME: semalar.StokHareket -> modeller.StokHareket
-    query = db.query(modeller.StokHareket).filter(modeller.StokHareket.kullanici_id == kullanici_id)
+    # KRİTİK DÜZELTME 22: IZOLASYON FILTRESI KALDIRILDI!
+    query = db.query(modeller.StokHareket)
 
     if stok_id:
-        # KRİTİK DÜZELTME: Yanlış kolon 'stok_id' yerine doğru kolon 'urun_id' kullanıldı.
         query = query.filter(modeller.StokHareket.urun_id == stok_id)
     if islem_tipi:
         query = query.filter(modeller.StokHareket.islem_tipi == islem_tipi)
@@ -564,4 +565,7 @@ def list_stok_hareketleri_endpoint(
     total = query.count()
     hareketler = query.order_by(modeller.StokHareket.tarih.desc()).offset(skip).limit(limit).all()
 
-    return {"items": hareketler, "total": total}
+    return {"items": [
+        modeller.StokHareketRead.model_validate(hareket, from_attributes=True)
+        for hareket in hareketler
+    ], "total": total}

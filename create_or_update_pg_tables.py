@@ -1,15 +1,14 @@
-# 'create_or_update_pg_tables.py' dosyasının GÜNCEL HALİ
+# 'create_or_update_pg_tables.py' dosyasının KESİN VE YENİ MİMARİYE UYUMLU HALİ
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 import logging
 
-# DÜZELTİLDİ: Tüm içe aktarmalar buraya taşındı.
+# KRİTİK DÜZELTME: SADECE MASTER DB MODELLERİ İÇE AKTARILIR.
 from api.modeller import (
-    Base, Musteri, Tedarikci, KasaBankaHesap, UrunNitelik, Kullanici,
-    CariHareket, Fatura, FaturaKalemi, GelirGider, Siparis, SiparisKalemi,
-    Stok, StokHareket, Sirket, SirketAyarlari, SirketBilgileri
+    Base, Kullanici, Firma, Ayarlar 
+    # Tenant modelleri (Musteri, Stok, KasaBankaHesap vb.) buradan import EDİLMEZ.
 )
 from api.guvenlik import get_password_hash
 
@@ -47,64 +46,44 @@ def create_or_update_tables():
                 for table_name in inspector.get_table_names():
                     connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;'))
         
-        logger.info("Yeni veritabanı tabloları oluşturuluyor...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Tablo oluşturma işlemi tamamlandı.")
+        logger.info("Yeni Master DB tabloları oluşturuluyor (Firma, Kullanici, Ayarlar)...")
+        # Base'in Master DB'de sadece Firma, Kullanici ve Ayarlar'ı oluşturması beklenir.
+        Base.metadata.create_all(bind=engine) 
+        logger.info("Master Tablo oluşturma işlemi tamamlandı.")
         
-        logger.info("Varsayılan veriler ekleniyor...")
+        logger.info("Varsayılan Kurucu Personel ve Firma ekleniyor...")
         
-        if not db.query(Kullanici).filter_by(kullanici_adi="admin").first():
+        default_email = "admin@master.com"
+        # KRİTİK: Email ile sorgulanır
+        if not db.query(Kullanici).filter_by(email=default_email).first(): 
             hashed_password = get_password_hash("755397")
+            
+            # 1. Kurucu Personeli Oluştur
             default_user = Kullanici(
-                kullanici_adi="admin",
+                ad="Master",
+                soyad="Yönetici",
+                email=default_email, 
+                telefon="5551234567",
                 sifre_hash=hashed_password,
-                ad="Yönetici",
-                soyad="Hesabı",
-                email="admin@onmuhasebe.com"
+                rol="master" 
             )
             db.add(default_user)
-            db.commit()
-            logger.info("Varsayılan 'admin' kullanıcısı başarıyla eklendi.")
-
-        # Nitelikler
-        urun_birimleri = ["Adet", "Metre", "Kilogram", "Litre", "Kutu"]
-        nitelik_listesi = [
-            ("Kategori 1", "kategori"), ("Kategori 2", "kategori"),
-            ("Marka 1", "marka"), ("Marka 2", "marka"),
-            ("Grup 1", "urun_grubu"), ("Grup 2", "urun_grubu"),
-            ("Türkiye", "ulke"), ("ABD", "ulke")
-        ]
-        
-        for ad in urun_birimleri:
-            if not db.query(UrunNitelik).filter_by(ad=ad, nitelik_tipi="birim").first():
-                db.add(UrunNitelik(ad=ad, nitelik_tipi="birim", kullanici_id=1))
-        
-        for ad, tip in nitelik_listesi:
-            if not db.query(UrunNitelik).filter_by(ad=ad, nitelik_tipi=tip).first():
-                db.add(UrunNitelik(ad=ad, nitelik_tipi=tip, kullanici_id=1))
-
-        if not db.query(Musteri).filter_by(kod="PERAKENDE_MUSTERI").first():
-            perakende_musteri = Musteri(ad="Perakende Müşterisi", kod="PERAKENDE_MUSTERI", aktif=True, kullanici_id=1)
-            db.add(perakende_musteri)
-        
-        if not db.query(Tedarikci).filter_by(kod="GENEL_TEDARIKCI").first():
-            genel_tedarikci = Tedarikci(ad="Genel Tedarikçi", kod="GENEL_TEDARIKCI", aktif=True, kullanici_id=1)
-            db.add(genel_tedarikci)
-
-        if not db.query(KasaBankaHesap).filter_by(hesap_adi="NAKİT KASA").first():
-            nakit_kasa = KasaBankaHesap(
-                hesap_adi="NAKİT KASA",
-                tip="KASA",
-                bakiye=0.0,
-                para_birimi="TL",
-                aktif=True,
-                kullanici_id=1
+            db.flush() # ID'yi alabilmek için
+            
+            # 2. Varsayılan Firmayı Oluştur (Tenant DB adı ile)
+            default_firma = Firma(
+                firma_adi="Master Yönetim Firması",
+                tenant_db_name=f"tenant_{default_user.id}_master",
+                kurucu_personel_id=default_user.id
             )
-            db.add(nakit_kasa)
-
-        db.commit()
-        logger.info("Varsayılan veriler başarıyla eklendi.")
-
+            db.add(default_firma)
+            
+            # 3. Kullanıcıyı Firmanın ID'sine Bağla (KRİTİK)
+            default_user.firma_id = default_firma.id
+            
+            db.commit()
+            logger.info(f"Varsayılan Master Kurucu Personeli ({default_email}) ve Firması başarıyla eklendi.")
+        
     except Exception as e:
         logger.error(f"Veritabanı işlemleri sırasında hata oluştu: {e}")
         db.rollback()

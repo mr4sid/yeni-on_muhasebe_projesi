@@ -7739,8 +7739,10 @@ class GirisEkrani(QDialog):
 
         self._form_layout = QGridLayout(self._frame)
 
-        self._form_layout.addWidget(QLabel("Kullanıcı Adı:"), 0, 0)
-        self._entry_username = QLineEdit()
+        # KRİTİK DÜZELTME 4: Kullanıcı Adı -> E-posta
+        self._form_layout.addWidget(QLabel("E-posta:"), 0, 0)
+        self._entry_username = QLineEdit() # Bu, kullanıcının e-postasını tutacak
+        self._entry_username.setPlaceholderText("E-posta adresinizi giriniz") # Placeholder eklendi
         self._form_layout.addWidget(self._entry_username, 0, 1)
 
         self._form_layout.addWidget(QLabel("Şifre:"), 1, 0)
@@ -7765,8 +7767,7 @@ class GirisEkrani(QDialog):
         self._main_layout.addLayout(self._button_layout)
         self._main_layout.addStretch()
         self._main_layout.addStretch()
-        self._entry_username.setFocus()
-        
+
         # main.py'den last_username değerini yükleyelim
         from main import load_config
         app_config = load_config()
@@ -7851,31 +7852,29 @@ class GirisEkrani(QDialog):
         self.layout().addWidget(sirket_label_bottom, alignment=Qt.AlignCenter | Qt.AlignBottom)
 
     def _on_login_clicked(self):
-        kullanici_adi = self._entry_username.text()
+        # KRİTİK DÜZELTME 5: Kullanıcı Adı yerine E-posta gönderilir
+        email = self._entry_username.text()
         sifre = self._entry_password.text()
 
-        if not kullanici_adi or not sifre:
-            QMessageBox.warning(self, "Hata", "Lütfen kullanıcı adı ve şifre giriniz.")
+        if not email or not sifre:
+            QMessageBox.warning(self, "Hata", "Lütfen E-posta ve şifre giriniz.")
             return
             
         from main import save_config, load_config
         app_config = load_config()
-        app_config['last_username'] = kullanici_adi
+        app_config['last_username'] = email # Son girilen e-postayı kaydet
         save_config(app_config)
 
         try:
-            # 1. Doğrulama çağrısı (Online/Offline fark etmeksizin OfflineLoginResponse sözlüğünü döndürür.)
-            result = self.db.kullanici_dogrula(kullanici_adi, sifre)
-            
+            # 1. Doğrulama çağrısı (Artık email kullanır)
+            result = self.db.kullanici_dogrula(email, sifre)
+
             # 2. Sonucu Kontrol Et ve Sinyali Gönder
-            # KRİTİK DÜZELTME: Sonuç bir sözlük ise ve kritik anahtarı (kullanici_id) içeriyorsa başarılıdır.
             if isinstance(result, dict) and "kullanici_id" in result:
-                # Başarılı Giriş: Full yanıtı sinyalle gönder
-                self.login_success.emit(result) 
+                self.login_success.emit(result)  
                 self.accept()
             else:
-                # Başarısız Giriş: result bir tuple (False, hata_mesaji) ise hata mesajını al.
-                hata_mesaji = "Kullanıcı adı veya şifre hatalı."
+                hata_mesaji = "E-posta veya şifre hatalı."
                 if isinstance(result, tuple) and len(result) > 1:
                     hata_mesaji = result[1]
                 

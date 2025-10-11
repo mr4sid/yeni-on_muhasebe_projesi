@@ -497,6 +497,7 @@ class App(QMainWindow):
         from pencereler import StokKartiPenceresi
         dialog = StokKartiPenceresi(
             self.tab_widget, 
+            
             self.db_manager, # <<< KRİTİK DÜZELTME: self.db yerine self.db_manager kullanıldı
             self.stok_yonetimi_sayfasi.stok_listesini_yenile,
             urun_duzenle=urun_data,

@@ -1,3 +1,4 @@
+# api/api_ana.py dosyasının TAMAMI (Database-per-Tenant Uyumlu Import ve Yaşam Döngüsü)
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -8,12 +9,12 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from sqlalchemy.future import create_engine 
 from sqlalchemy.orm import sessionmaker 
-from .veritabani import DATABASE_URL, get_db, SessionLocal 
+# KRİTİK DÜZELTME 1: SessionLocal ve get_db kaldırıldı. Master DB fonksiyonları eklendi.
+from .veritabani import get_master_db, get_master_engine 
+from api import modeller
 # Başlangıç verileri için kullanılacak modeller
-from .modeller import (
-    Base, Musteri, Tedarikci, Kullanici, Stok, Fatura, FaturaKalemi,
-    CariHareket, Siparis, SiparisKalemi, StokHareket,
-    SirketBilgileri, SirketAyarlari, KasaBankaHesap, GelirGider, UrunNitelik
+from api.modeller import (
+    Base, Kullanici, Firma, Ayarlar # Master DB'deki modeller
 )
 # Mevcut rotaların içe aktarılması
 from .rotalar import (
@@ -28,51 +29,36 @@ from .rotalar.siparis_faturalar import siparisler_router, faturalar_router
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Uygulama başlangıcında tabloları oluşturacak motor
-engine = create_engine(str(DATABASE_URL))
-
-app = FastAPI(
-    title="Ön Muhasebe Sistemi API",
-    description="Ön muhasebe sistemi için RESTful API",
-    version="1.0.0",
-)
-
-# CORS ayarları
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Uygulama başlangıcında Master DB motorunu hazırlar
+engine = get_master_engine()
 
 # Uygulama başladıktan sonra çalışacak olay
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Uygulama başlangıç ve kapanışında çalışacak kod.
-    Veritabanı tablolarını oluşturur ve başlangıç verilerini ekler.
+    Master DB tablolarının varlığını kontrol eder.
     """
     logger.info("API başlatılıyor...")
     
-    # Düzeltme: Veritabanı motorunu doğrudan oluşturup tabloları yaratıyoruz
+    # Master DB tablolarının (Kullanici, Firma, Ayarlar) varlığını kontrol et
     try:
-        from .veritabani import get_engine
-        engine = get_engine()
-        # --- BU SATIRI YORUM SATIRI YAPIYORUZ ---
-        # Base.metadata.create_all(bind=engine) 
-        logger.info("Veritabanı tablolarının kontrolü Alembic'e devredildi.")
+        # SADECE Master DB'yi ilgilendiren tablolar oluşturulur
+        Base.metadata.create_all(bind=get_master_engine(), tables=[modeller.Kullanici.__table__, modeller.Firma.__table__, modeller.Ayarlar.__table__]) 
+        logger.info("Master DB (Firma, Kullanici) şeması kontrol edildi/oluşturuldu.")
     except Exception as e:
-        logger.error(f"Veritabanı motoru başlatılırken hata oluştu: {e}")
+        logger.error(f"Master DB şeması oluşturulurken hata oluştu: {e}")
     
-    # Başlangıç verilerini kontrol etme
-    db = next(get_db()) # Düzeltme: get_db() fonksiyonu ile bir oturum alınıyor.
+    # Başlangıç verilerini kontrol etme (Master DB kullanılır)
+    db = next(get_master_db()) # Master DB oturumu alınır.
     try:
-        if db.query(Kullanici).count() == 0:
-            logger.info("Hiç kullanıcı yok. Örnek kullanıcı ve veriler oluşturulacak.")
-            # Burada create_initial_data() gibi bir fonksiyon çağırılabilir
+        default_email = "admin@master.com"
+        # Kullanıcı var mı kontrolü (ORM yapılandırmasını tetikler)
+        if db.query(modeller.Kullanici).filter(modeller.Kullanici.email == default_email).first() is None:
+             logger.warning("Master admin kullanıcısı bulunamadı. Lütfen create_or_update_pg_tables.py scriptini çalıştırın.")
+
     except Exception as e:
-        logger.error(f"Başlangıç verileri kontrol edilirken hata oluştu: {e}")
+        logger.error(f"Başlangıç verileri kontrol edilirken veya ORM yapılandırılırken hata oluştu: {e}")
     finally:
         db.close()
     
@@ -82,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     lifespan=lifespan,
     title="Ön Muhasebe Sistemi API",
-    description="Ön muhasebe sistemi için RESTful API",
+    description="Ön muhasebe sistemi için RESTful API (Database-per-Tenant)",
     version="1.0.0",
 )
 
@@ -98,7 +84,7 @@ app.add_middleware(
 
 # Router'ları (rotaları) uygulamaya dahil etme
 app.include_router(dogrulama.router, tags=["Kimlik Doğrulama"])
-app.include_router(kullanicilar.router, tags=["Kullanıcılar"])
+app.include_router(kullanicilar.router, tags=["Personel Yönetimi"])
 app.include_router(musteriler.router, tags=["Müşteriler"])
 app.include_router(tedarikciler.router, tags=["Tedarikçiler"])
 app.include_router(stoklar.router, tags=["Stoklar"])
@@ -115,4 +101,4 @@ app.include_router(faturalar_router, tags=["Faturalar"])
 
 @app.get("/")
 def read_root():
-    return {"message": "On Muhasebe API'sine hoş geldiniz!"}
+    return {"message": "On Muhasebe API'sine hoş geldiniz! (Database-per-Tenant Aktif)"}

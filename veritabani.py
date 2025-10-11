@@ -207,7 +207,7 @@ class OnMuhasebe:
             return False, f"Şirket bilgileri kaydedilirken hata: {e}"
 
     # --- KULLANICI YÖNETİMİ ---
-    def kullanici_dogrula(self, kullanici_adi: str, sifre: str) -> Optional[dict]:
+    def kullanici_dogrula(self, email: str, sifre: str) -> Optional[dict]:
         """
         Kullanıcıyı öncelikli olarak API üzerinden, başarısız olursa yerel veritabanı üzerinden doğrular.
         """
@@ -215,24 +215,20 @@ class OnMuhasebe:
         if self.is_online:
             logger.info("API üzerinden kullanıcı doğrulaması deneniyor...")
             try:
-                login_data = {"kullanici_adi": kullanici_adi, "sifre": sifre}
-                # KRİTİK DÜZELTME: Doğrudan API'den offline login response'u alınıyor.
+                # KRİTİK DÜZELTME 1: API'ye email ve sifre gönderilir (API'nin beklediği format)
+                login_data = {"email": email, "sifre": sifre} 
                 response_data = self._make_api_request("POST", "/dogrulama/login", data=login_data)
 
                 if response_data and "access_token" in response_data and "token_type" in response_data:
                     self.access_token = response_data["access_token"]
                     self.token_type = response_data["token_type"]
                     
-                    # KRİTİK DÜZELTME: Token'ı kalıcı olarak kaydet
                     self.lokal_db.ayarlari_kaydet({
                         "access_token": self.access_token, 
                         "token_type": self.token_type
                     }) 
                     
-                    # Bu noktada, API'den OfflineLoginResponse (ID, Hash, Rol dahil) gelmiş olmalı.
-                    
-                    # Kullanıcı bilgilerini yerel DB'ye kaydetmek/güncellemek için main.py'ye tüm yanıtı döndürüyoruz.
-                    logger.info(f"Kullanıcı API üzerinden başarıyla doğrulandı: {kullanici_adi}")
+                    logger.info(f"Kullanıcı API üzerinden başarıyla doğrulandı: {email}")
                     return response_data
                 else:
                     logger.warning("Kullanıcı doğrulama API üzerinden başarısız: Yanıt formatı hatalı veya token yok.")
@@ -241,21 +237,20 @@ class OnMuhasebe:
                 logger.error(f"API isteği sırasında hata oluştu: {e}. Çevrimdışı moda geçiliyor.")
                 self.is_online = False
                 # Hata durumunda yerel veritabanına düşüşü sağla
-                return authenticate_offline_user(kullanici_adi, sifre) # KRİTİK DÜZELTME: Global fonksiyonu çağır
+                return authenticate_offline_user(email, sifre)
 
         # 2. Adım: Çevrimdışı modda yerel veritabanı üzerinden doğrula.
         else:
             logger.info("Çevrimdışı mod: Yerel veritabanı üzerinden kullanıcı doğrulaması deneniyor...")
-            return authenticate_offline_user(kullanici_adi, sifre) # KRİTİK DÜZELTME: Global fonksiyonu çağır
+            return authenticate_offline_user(email, sifre)
 
     def kullanici_dogrula_yerel(self, kullanici_adi, sifre):
         """
-        DEPRECATED: Bu metot kaldırıldı, yerine authenticate_offline_user kullanılacak.
+        DEPRECATED: Bu metot artık kullanılmamalıdır.
         """
         logging.warning("kullanici_dogrula_yerel metodu artık DEPRECATED. Lütfen authenticate_offline_user kullanın.")
-        return authenticate_offline_user(kullanici_adi, sifre)
-
-
+        return authenticate_offline_user(kullanici_adi, sifre) # Hatalı da olsa, geriye dönük uyumluluk için bırakıldı.
+    
     def _get_current_user(self) -> Optional[dict]:
         """
         API'den mevcut kullanıcının bilgilerini çeker.
@@ -2138,63 +2133,59 @@ class OnMuhasebe:
 
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.
-def update_local_user_credentials(kullanici_id: int, kullanici_adi: str, sifre_hash: str, rol: str):
+def update_local_user_credentials(kullanici_id: int, email: str, sifre_hash: str, rol: str): 
     """
     Başarılı API girişinden sonra dönen kritik bilgileri (şifre hash dahil) 
     yerel SQLite veritabanındaki Kullanici kaydına yazar/günceller.
     """
     try:
-        # KRİTİK DÜZELTME: SessionLocal hatasını çözmek için lokal_db_servisi.get_db() kullanıldı
         with lokal_db_servisi.get_db() as db: 
-            
-            # Kullanıcıyı ID'si ile yerel DB'de bul
             user = db.query(Kullanici).filter(Kullanici.id == kullanici_id).first()
 
             if user:
-                # Hash'i ve diğer kritik bilgileri güncelle
-                user.kullanici_adi = kullanici_adi
+                # KRİTİK DÜZELTME 2: email güncellenir. kullanici_adi kaldırıldı.
+                user.email = email 
                 user.sifre_hash = sifre_hash
                 user.rol = rol 
             else:
                 # Kullanıcı yoksa (ilk giriş), oluştur
                 user = Kullanici(
                     id=kullanici_id,
-                    kullanici_adi=kullanici_adi,
+                    email=email, # email kullanılır
                     sifre_hash=sifre_hash,
                     rol=rol,
                 )
                 db.add(user)
             
             db.commit() 
-            logger.info(f"Yerel DB: Kullanıcı '{kullanici_adi}' (ID: {kullanici_id}) şifre hash'i güncellendi/kaydedildi.")
+            logger.info(f"Yerel DB: Kullanıcı '{email}' (ID: {kullanici_id}) şifre hash'i güncellendi/kaydedildi.")
             return True
     except Exception as e:
         logger.error(f"Yerel kullanıcı bilgilerini güncellerken KRİTİK HATA: {e}", exc_info=True)
         return False
 
-def authenticate_offline_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+def authenticate_offline_user(email: str, password: str) -> Optional[Dict[str, Any]]: 
     """
-    Çevrimdışı modda yerel veritabanı üzerinden kullanıcı adı ve şifre ile doğrular.
+    Çevrimdışı modda yerel veritabanı üzerinden e-posta ve şifre ile doğrular.
     """
     try:
-        # KRİTİK DÜZELTME: SessionLocal hatasını çözmek için lokal_db_servisi.get_db() kullanıldı
         with lokal_db_servisi.get_db() as db: 
             
-            user = db.query(Kullanici).filter(Kullanici.kullanici_adi == username).first()
+            # KRİTİK DÜZELTME 3: Kullanici.kullanici_adi yerine Kullanici.email ile sorgulama yapılır
+            user = db.query(Kullanici).filter(Kullanici.email == email).first()
 
             if not user or not user.sifre_hash:
-                logger.warning(f"Yerel DB: Kullanıcı '{username}' bulunamadı veya şifre hash'i eksik.")
+                logger.warning(f"Yerel DB: Kullanıcı '{email}' bulunamadı veya şifre hash'i eksik.")
                 return None
 
-            # KRİTİK: API'deki gibi hash doğrulaması yap
             is_password_correct = verify_password(password, user.sifre_hash)
 
             if is_password_correct:
-                logger.info(f"Yerel DB: Kullanıcı '{username}' için doğrulama başarılı.")
-                # Başarılı doğrulama sonrası, token gerektirmeyen bir yanıt yapısı döndürülür
+                logger.info(f"Yerel DB: Kullanıcı '{email}' için doğrulama başarılı.")
+                # KRİTİK DÜZELTME 4: Response'ta email döndürülür
                 return {
                     "kullanici_id": user.id,
-                    "kullanici_adi": user.kullanici_adi,
+                    "email": user.email,
                     "rol": user.rol if user.rol else "user",
                 }
             else:

@@ -1,23 +1,32 @@
+# api/rotalar/tedarikciler.py (Database-per-Tenant ve Temizlik Uygulandı)
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from typing import List, Optional
 
-from .. import modeller, semalar
-from ..veritabani import get_db
+from .. import modeller # DÜZELTME: semalar kaldırıldı
+# KRİTİK DÜZELTME 1: Tenant DB'ye dinamik bağlanacak yeni bağımlılık tanımlandı
+from ..veritabani import get_db as get_tenant_db
 from ..api_servisler import CariHesaplamaService
 from .. import guvenlik
+
+# KRİTİK DÜZELTME 2: Tenant DB bağlantısı için kullanılacak bağımlılık
+TENANT_DB_DEPENDENCY = get_tenant_db
+
 
 router = APIRouter(prefix="/tedarikciler", tags=["Tedarikçiler"])
 
 @router.post("/", response_model=modeller.TedarikciRead)
 def create_tedarikci(
     tedarikci: modeller.TedarikciCreate,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user) # DÜZELTME: JWT KURALI
+    # KRİTİK DÜZELTME 3: Tenant DB bağlantısı kullanılacak
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # MODEL TUTARLILIĞI: ORM modeli modeller.Tedarikci kullanıldı.
-    db_tedarikci = modeller.Tedarikci(**tedarikci.model_dump(exclude={"kullanici_id"}), kullanici_id=current_user.id)
+    # DÜZELTME 4: SADECE KODUN BENZERSİZLİĞİ KONTROL EDİLİR.
+    # DbT'de 'kullanici_id' artık Master'daki ID değil, Tenant DB'deki ID'dir (Genellikle 1).
+    db_tedarikci = modeller.Tedarikci(**tedarikci.model_dump(exclude={"kullanici_id"}), kullanici_id=1) 
+    
     db.add(db_tedarikci)
     db.commit()
     db.refresh(db_tedarikci)
@@ -25,15 +34,16 @@ def create_tedarikci(
 
 @router.get("/", response_model=modeller.TedarikciListResponse)
 def read_tedarikciler(
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), # DÜZELTME: JWT KURALI
+    # KRİTİK DÜZELTME 5: Tenant DB bağlantısı kullanılacak
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
     skip: int = 0,
     limit: int = 25,
     arama: Optional[str] = None,
     aktif_durum: Optional[bool] = None
 ):
-    # MODEL TUTARLILIĞI: Sorgularda modeller.Tedarikci kullanıldı.
-    query = db.query(modeller.Tedarikci).filter(modeller.Tedarikci.kullanici_id == current_user.id)
+    # KRİTİK DÜZELTME 6: Tenant DB'deyiz, IZOLASYON FİLTRESİ KALDIRILDI!
+    query = db.query(modeller.Tedarikci) 
 
     if arama:
         search_term = f"%{arama}%"
@@ -55,9 +65,8 @@ def read_tedarikciler(
     cari_hizmeti = CariHesaplamaService(db)
     tedarikciler_with_balance = []
     for tedarikci in tedarikciler:
-        # Cari Tipi Enum değeri kullanıldı
-        net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci.id, semalar.CariTipiEnum.TEDARIKCI.value)
-        # from_attributes=True eklendi
+        # DÜZELTME 7: semalar.CariTipiEnum yerine modeller.CariTipiEnum kullanıldı
+        net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci.id, modeller.CariTipiEnum.TEDARIKCI.value)
         tedarikci_dict = modeller.TedarikciRead.model_validate(tedarikci, from_attributes=True).model_dump()
         tedarikci_dict["net_bakiye"] = net_bakiye
         tedarikciler_with_balance.append(tedarikci_dict)
@@ -67,19 +76,18 @@ def read_tedarikciler(
 @router.get("/{tedarikci_id}", response_model=modeller.TedarikciRead)
 def read_tedarikci(
     tedarikci_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user) # DÜZELTME: JWT KURALI
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # MODEL TUTARLILIĞI: Sorgularda modeller.Tedarikci kullanıldı.
+    # KRİTİK DÜZELTME 8: Sadece ID filtresi kullanılır (İzolasyon DB seviyesinde)
     tedarikci = db.query(modeller.Tedarikci).filter(
-        modeller.Tedarikci.id == tedarikci_id,
-        modeller.Tedarikci.kullanici_id == current_user.id
+        modeller.Tedarikci.id == tedarikci_id
     ).first()
     if not tedarikci:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
 
     cari_hizmeti = CariHesaplamaService(db)
-    net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci_id, semalar.CariTipiEnum.TEDARIKCI.value)
+    net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci_id, modeller.CariTipiEnum.TEDARIKCI.value)
     tedarikci_dict = modeller.TedarikciRead.model_validate(tedarikci, from_attributes=True).model_dump()
     tedarikci_dict["net_bakiye"] = net_bakiye
     return tedarikci_dict
@@ -88,13 +96,12 @@ def read_tedarikci(
 def update_tedarikci(
     tedarikci_id: int,
     tedarikci: modeller.TedarikciUpdate,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user) # DÜZELTME: JWT KURALI
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # MODEL TUTARLILIĞI: Sorgularda modeller.Tedarikci kullanıldı.
+    # KRİTİK DÜZELTME 9: Sadece ID filtresi kullanılır
     db_tedarikci = db.query(modeller.Tedarikci).filter(
-        modeller.Tedarikci.id == tedarikci_id,
-        modeller.Tedarikci.kullanici_id == current_user.id
+        modeller.Tedarikci.id == tedarikci_id
     ).first()
     if not db_tedarikci:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
@@ -107,13 +114,12 @@ def update_tedarikci(
 @router.delete("/{tedarikci_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tedarikci(
     tedarikci_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user) # DÜZELTME: JWT KURALI
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # MODEL TUTARLILIĞI: Sorgularda modeller.Tedarikci kullanıldı.
+    # KRİTİK DÜZELTME 10: Sadece ID filtresi kullanılır
     db_tedarikci = db.query(modeller.Tedarikci).filter(
-        modeller.Tedarikci.id == tedarikci_id,
-        modeller.Tedarikci.kullanici_id == current_user.id
+        modeller.Tedarikci.id == tedarikci_id
     ).first()
     if not db_tedarikci:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
@@ -124,17 +130,17 @@ def delete_tedarikci(
 @router.get("/{tedarikci_id}/net_bakiye", response_model=modeller.NetBakiyeResponse)
 def get_net_bakiye_endpoint(
     tedarikci_id: int,
-    db: Session = Depends(get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user) # DÜZELTME: JWT KURALI
+    db: Session = Depends(TENANT_DB_DEPENDENCY),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # MODEL TUTARLILIĞI: Sorgularda modeller.Tedarikci kullanıldı.
+    # KRİTİK DÜZELTME 11: Sadece ID filtresi kullanılır
     tedarikci = db.query(modeller.Tedarikci).filter(
-        modeller.Tedarikci.id == tedarikci_id,
-        modeller.Tedarikci.kullanici_id == current_user.id
+        modeller.Tedarikci.id == tedarikci_id
     ).first()
     if not tedarikci:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
 
     cari_hizmeti = CariHesaplamaService(db)
-    net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci_id, semalar.CariTipiEnum.TEDARIKCI.value)
+    # DÜZELTME 12: semalar.CariTipiEnum yerine modeller.CariTipiEnum kullanıldı
+    net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci_id, modeller.CariTipiEnum.TEDARIKCI.value)
     return {"net_bakiye": net_bakiye}
