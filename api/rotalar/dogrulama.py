@@ -17,35 +17,61 @@ router = APIRouter(prefix="/dogrulama", tags=["Kimlik Doğrulama"])
 
 
 # --- YARDIMCI FONKSİYON: Tenant DB'ye Varsayılan Veri Ekleme (Aynı Kalır) ---
-def _add_default_tenant_data(db: Session):
+def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
     """Yeni oluşturulan boş tenant veritabanına varsayılan verileri ekler."""
     
-    logger.info(f"Yeni Tenant DB için varsayılan veriler ekleniyor.")
-    KULLANICI_ID = 1
+    logger.info(f"Yeni Tenant DB için varsayılan veriler ekleniyor. Master Kullanıcı ID: {olusturan_kullanici_id}")
 
     try:
+        # --- NİHAİ DÜZELTME: TENANT'IN İLK KULLANICISINI OLUŞTUR ---
+        # Master DB'deki kurucu kullanıcının bilgilerini alıp Tenant'ın kendi
+        # kullanicilar tablosuna ilk kaydı (ID=1 olacak şekilde) ekliyoruz.
+        master_db = next(get_master_db())
+        kurucu_kullanici = master_db.query(modeller.Kullanici).filter(modeller.Kullanici.id == olusturan_kullanici_id).first()
+        master_db.close()
+
+        if not kurucu_kullanici:
+            raise Exception(f"Master DB'de ID'si {olusturan_kullanici_id} olan kurucu kullanıcı bulunamadı.")
+
+        # Tenant'ın kendi içindeki ilk kullanıcı kaydı
+        tenant_ilk_kullanici = modeller.Kullanici(
+            id=1, # Manuel olarak ID'yi 1 olarak belirliyoruz
+            ad=kurucu_kullanici.ad,
+            soyad=kurucu_kullanici.soyad,
+            email=kurucu_kullanici.email,
+            sifre_hash=kurucu_kullanici.sifre_hash, # Şifre hash'i master'dan alınır
+            rol="yonetici", # Tenant içindeki rolü
+            firma_id=kurucu_kullanici.firma_id # Bu bilgi master'daki firma ID'sidir, tenant içinde anlamı olmayabilir ama tutarlılık için ekleyebiliriz.
+        )
+        db.add(tenant_ilk_kullanici)
+        # Önce bu kullanıcıyı commit'leyerek veritabanında var olmasını sağlıyoruz.
+        db.commit()
+        db.refresh(tenant_ilk_kullanici)
+        logger.info(f"Tenant DB için ilk kullanıcı '{tenant_ilk_kullanici.email}' ID=1 ile başarıyla oluşturuldu.")
+        # --- DÜZELTME SONU ---
+
+        # Artık tenant içinde ID'si 1 olan bir kullanıcı olduğu için aşağıdaki kayıtlar başarılı olacaktır.
+        # Tüm kayıtlarda kullanici_id=1 kullanılacak.
+        TENANT_USER_ID = 1
+
         # 1. CARİLER
-        perakende_musteri = modeller.Musteri(ad="Perakende Müşterisi", kod="PERAKENDE_MUSTERI", aktif=True, kullanici_id=KULLANICI_ID)
-        db.add(perakende_musteri); db.flush()
-        db.add(modeller.CariHesap(cari_id=perakende_musteri.id, cari_tip=modeller.CariTipiEnum.MUSTERI.value, bakiye=0.0))
+        perakende_musteri = modeller.Musteri(ad="Perakende Müşterisi", kod="PERAKENDE_MUSTERI", aktif=True, kullanici_id=TENANT_USER_ID)
+        db.add(perakende_musteri)
         
-        genel_tedarikci = modeller.Tedarikci(ad="Genel Tedarikçi", kod="GENEL_TEDARIKCI", aktif=True, kullanici_id=KULLANICI_ID)
-        db.add(genel_tedarikci); db.flush()
+        genel_tedarikci = modeller.Tedarikci(ad="Genel Tedarikçi", kod="GENEL_TEDARIKCI", aktif=True, kullanici_id=TENANT_USER_ID)
+        db.add(genel_tedarikci)
+
+        # Diğer varsayılan veriler...
+        db.add(modeller.KasaBankaHesap(hesap_adi="NAKİT KASA", tip=modeller.KasaBankaTipiEnum.KASA, bakiye=0.0, para_birimi="TL", aktif=True, kullanici_id=TENANT_USER_ID))
+        db.add(modeller.UrunBirimi(ad="Adet", kullanici_id=TENANT_USER_ID))
+        
+        db.commit() # Commit'i buraya alalım
+        
+        # CariHesap'ları commit'ten sonra ekleyelim
+        db.refresh(perakende_musteri)
+        db.refresh(genel_tedarikci)
+        db.add(modeller.CariHesap(cari_id=perakende_musteri.id, cari_tip=modeller.CariTipiEnum.MUSTERI.value, bakiye=0.0))
         db.add(modeller.CariHesap(cari_id=genel_tedarikci.id, cari_tip=modeller.CariTipiEnum.TEDARIKCI.value, bakiye=0.0))
-
-        # 2. KASA/BANKA
-        db.add(modeller.KasaBankaHesap(hesap_adi="NAKİT KASA", tip=modeller.KasaBankaTipiEnum.KASA, bakiye=0.0, para_birimi="TL", aktif=True, kullanici_id=KULLANICI_ID))
-
-        # 3. NİTELİKLER
-        nitelik_esleme = {"kategori": modeller.UrunKategori, "marka": modeller.UrunMarka, "urun_grubu": modeller.UrunGrubu, "ulke": modeller.Ulke, "gelir_siniflandirma": modeller.GelirSiniflandirma, "gider_siniflandirma": modeller.GiderSiniflandirma}
-        urun_birimleri = ["Adet", "Metre", "Kilogram", "Litre", "Kutu"]
-        nitelik_listesi = [("Genel Kategori", "kategori"), ("Genel Marka", "marka"), ("Hizmet", "urun_grubu"), ("Türkiye", "ulke"), ("Satış Geliri", "gelir_siniflandirma"), ("Maaş Gideri", "gider_siniflandirma")]
-
-        for ad in urun_birimleri: db.add(modeller.UrunBirimi(ad=ad, kullanici_id=KULLANICI_ID))
-        for ad, tip in nitelik_listesi: 
-            Model = nitelik_esleme.get(tip)
-            if Model:
-                db.add(Model(ad=ad, kullanici_id=KULLANICI_ID))
 
         db.commit()
         logger.info(f"Varsayılan veriler başarıyla Tenant DB'ye eklendi.")
@@ -60,33 +86,30 @@ def _add_default_tenant_data(db: Session):
 @router.post("/login", response_model=modeller.OfflineLoginResponse)
 def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends(get_master_db)):
     
-    # KRİTİK DÜZELTME 1: Sorgu email üzerinden yapılır ve Firma verisi joinedload ile yüklenir.
+    # --- NİHAİ DÜZELTME BURADA ---
+    # Sorguya, Kullanici ile birlikte Firma verisini de "hemen yükle" komutunu ekliyoruz.
     user = db.query(modeller.Kullanici).options(
         joinedload(modeller.Kullanici.firma) 
     ).filter(
-        modeller.Kullanici.email == user_login.email # KRİTİK: EMAIL ile filtreleme
+        modeller.Kullanici.email == user_login.email
     ).first()
 
     if not user or not verify_password(user_login.sifre, user.sifre_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Hatalı e-posta veya şifre.")
     
-    # Tenant/Firma bilgisini yükle (joinedload sayesinde user.firma direkt erişilebilir)
-    firma_obj = user.firma 
-    tenant_db_name = firma_obj.tenant_db_name if firma_obj else None
-    firma_adi = firma_obj.firma_adi if firma_obj else None
-
-    # KRİTİK DÜZELTME 2: Firma bilgisi eksikse 401 döndür 
-    if not tenant_db_name:
+    # "joinedload" sayesinde user.firma artık dolu ve kontrol edilebilir olacaktır.
+    if not user.firma or not user.firma.tenant_db_name:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Kullanıcının Tenant/Firma bilgisi eksik.")
 
-    # JWT'yi email ve tenant_db ile oluştur
+    tenant_db_name = user.firma.tenant_db_name
+    firma_adi = user.firma.firma_adi
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email, "tenant_db": tenant_db_name}, 
         expires_delta=access_token_expires
     )
 
-    # KRİTİK DÜZELTME 3: Response'ta email ve firma_adi döndürülür
     return {
         "access_token": access_token, 
         "token_type": "bearer", 
@@ -98,20 +121,16 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
         "tenant_db_name": tenant_db_name
     }
 
-
 @router.post("/register", response_model=modeller.KullaniciRead)
-def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(get_master_db)): # Master DB kullanılır
+def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(get_master_db)):
     
-    # E-posta/Telefon benzersizliği kontrolü
-    if db.query(modeller.Kullanici).filter(
-        (modeller.Kullanici.email == user_create.email) | 
-        (modeller.Kullanici.telefon == user_create.telefon)
-    ).first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="E-posta veya Telefon numarası zaten mevcut.")
+    # Mevcut kullanıcı veya firma adı kontrolü
+    if db.query(modeller.Kullanici).filter(modeller.Kullanici.email == user_create.email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="E-posta zaten mevcut.")
+    if db.query(modeller.Firma).filter(modeller.Firma.firma_adi == user_create.firma_adi).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Firma adı zaten mevcut.")
 
     hashed_password = get_password_hash(user_create.sifre)
-    
-    # Kurucu Personeli Master DB'ye ekle
     db_user = modeller.Kullanici(
         sifre_hash=hashed_password,
         ad=user_create.ad,
@@ -121,12 +140,27 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
         rol=user_create.rol
     )
     
+    # Firma adından güvenli bir veritabanı adı oluştur
+    tenant_db_name = f"tenant_{user_create.firma_adi}".lower().replace(' ', '_').replace('ı', 'i').replace('ö', 'o').replace('ü', 'u').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g')
+    
+    master_engine = get_master_engine()
+    
+    # --- NİHAİ DÜZELTME BURADA ---
+    # İşleme başlamadan önce, olası artık veritabanını temizle
+    try:
+        with master_engine.connect() as conn:
+            conn.execution_options(isolation_level="AUTOCOMMIT")
+            conn.execute(text(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{tenant_db_name}';"))
+            conn.execute(text(f"DROP DATABASE IF EXISTS {tenant_db_name};"))
+        logger.info(f"Olası artık veritabanı ({tenant_db_name}) başarıyla temizlendi.")
+    except Exception as cleanup_error:
+        logger.error(f"Başlangıç temizliği sırasında hata oluştu: {cleanup_error}")
+        # Bu kritik bir hata değil, sadece loglayıp devam edebiliriz.
+    # --- DÜZELTME SONU ---
+
     try:
         db.add(db_user)
         db.flush() 
-        
-        # Firma Kaydı ve Tenant DB Adını Belirle
-        tenant_db_name = f"tenant_{db_user.id}_{user_create.firma_adi}".lower().replace(' ', '_')
         
         db_firma = modeller.Firma(
             firma_adi=user_create.firma_adi,
@@ -134,31 +168,21 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
             kurucu_personel_id=db_user.id
         )
         db.add(db_firma)
-        
-        # Kullanıcıyı Firmaya Bağla
         db_user.firma_id = db_firma.id
-        db.commit() # Master DB'ye ilk commit
+        db.commit()
         
-        # Fiziksel Veritabanı Oluşturma
-        master_engine = get_master_engine() 
         with master_engine.connect() as conn:
             conn.execution_options(isolation_level="AUTOCOMMIT").execute(
                 text(f"CREATE DATABASE {tenant_db_name} ENCODING 'UTF8' TEMPLATE template0;")
             )
-            conn.commit() # CREATE DATABASE komutu için gerekli
-        logger.info(f"Fiziksel Veritabanı oluşturuldu: {tenant_db_name}")
-
-        # Tenant DB'ye Bağlan ve Tabloları/Veriyi Oluştur
+        
         tenant_engine = get_tenant_engine(tenant_db_name)
-        from ..modeller import Base as TenantBase 
-        TenantBase.metadata.create_all(bind=tenant_engine)
-        logger.info(f"Tablolar Tenant DB'ye başarıyla oluşturuldu.")
-
-        # Varsayılan Verileri Yeni Tenant DB'ye Ekle
+        modeller.Base.metadata.create_all(bind=tenant_engine)
+        
         TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=tenant_engine)
         tenant_db = TenantSessionLocal()
         try:
-            _add_default_tenant_data(tenant_db) 
+            _add_default_tenant_data(tenant_db, olusturan_kullanici_id=db_user.id) 
         finally:
             tenant_db.close()
         
@@ -167,16 +191,17 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
         user_read.firma_adi = db_firma.firma_adi
         return user_read
 
-    except IntegrityError as e:
-        db.rollback()
-        logger.error(f"Kullanıcı kaydı oluşturulurken IntegrityError: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="E-posta, Telefon veya Firma adı zaten mevcut."
-        )
     except Exception as e:
         db.rollback()
-        logger.error(f"Kullanıcı kaydı oluşturulurken beklenmedik hata: {e}")
+        # Hata durumunda son bir kez daha temizlik yapmayı dene
+        try:
+            with master_engine.connect() as conn:
+                conn.execution_options(isolation_level="AUTOCOMMIT")
+                conn.execute(text(f"DROP DATABASE IF EXISTS {tenant_db_name};"))
+            logger.info(f"Hata sonrası artık veritabanı ({tenant_db_name}) başarıyla silindi.")
+        except Exception as final_cleanup_error:
+            logger.error(f"Hata sonrası temizlik sırasında hata oluştu: {final_cleanup_error}")
+                
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Kullanıcı kaydı oluşturulamadı: {e}"

@@ -84,8 +84,13 @@ def read_stoklar(
     db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
-    # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
-    query = db.query(modeller.Stok)
+    query = db.query(modeller.Stok).options(
+        joinedload(modeller.Stok.kategori),
+        joinedload(modeller.Stok.marka),
+        joinedload(modeller.Stok.urun_grubu),
+        joinedload(modeller.Stok.birim),
+        joinedload(modeller.Stok.mense_ulke)
+    )
     
     if arama:
         search_filter = or_(
@@ -117,7 +122,7 @@ def read_stoklar(
 
     total_count = query.count()
     
-    stoklar = query.offset(skip).limit(limit).all()
+    stoklar = query.order_by(modeller.Stok.id.desc()).offset(skip).limit(limit).all() # Sıralamayı ID'ye göre değiştirmek daha tutarlı olabilir
     
     return {"items": [
         modeller.StokRead.model_validate(s, from_attributes=True)

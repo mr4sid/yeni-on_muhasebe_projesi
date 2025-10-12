@@ -1,4 +1,4 @@
-# api/veritabani.py Dosyasının TAM İÇERİĞİ (Database-per-Tenant Hazırlığı)
+# api/veritabani.py Dosyasının TAM İÇERİĞİ (pool_pre_ping eklendi)
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -28,11 +28,10 @@ if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, MASTER_DB_NAME]):
     raise ValueError("Veritabanı bağlantı bilgileri eksik.")
 
 # SQLAlchemy motorları ve Session maker'lar için sözlükler
-# Artık tek bir Engine değil, her Tenant için dinamik Engine'ler olacak.
 tenant_engines: Dict[str, Engine] = {}
 tenant_session_locals: Dict[str, sessionmaker] = {}
 
-# MASTER DB için gerekli global instance'lar (MASTER, kullanıcı listesini tutar)
+# MASTER DB için gerekli global instance'lar
 master_engine: Optional[Engine] = None
 MasterSessionLocal: Optional[sessionmaker] = None
 
@@ -40,7 +39,8 @@ def get_master_engine() -> Engine:
     """MASTER veritabanı motorunu döndürür (Kullanıcı kayıtları için)."""
     global master_engine
     if master_engine is None:
-        master_engine = create_engine(DATABASE_URL)
+        # --- GÜNCELLEME BURADA: pool_pre_ping=True eklendi ---
+        master_engine = create_engine(DATABASE_URL, pool_pre_ping=True)
         logger.info(f"MASTER DB motoru başlatıldı: {MASTER_DB_NAME}")
     return master_engine
 
@@ -55,8 +55,6 @@ def get_master_db():
         yield db
     except Exception as e:
         logger.critical(f"MASTER DB bağlantısı kurulamadı! Hata: {e}")
-        # Hata durumunda MASTER bağlantısı yeniden kurulmalı
-        # master_engine.dispose() # Tekrar bağlanma mekanizması burada daha karmaşık ele alınmalı
         raise
     finally:
         db.close()
@@ -65,7 +63,8 @@ def get_tenant_engine(tenant_db_name: str) -> Engine:
     """Tenant veritabanı motorunu döndürür, yoksa oluşturur."""
     if tenant_db_name not in tenant_engines:
         tenant_url = f"{ROOT_DB_URL}{tenant_db_name}"
-        engine = create_engine(tenant_url)
+        # --- GÜNCELLEME BURADA: pool_pre_ping=True eklendi ---
+        engine = create_engine(tenant_url, pool_pre_ping=True)
         tenant_engines[tenant_db_name] = engine
         logger.info(f"Yeni Tenant DB motoru başlatıldı: {tenant_db_name}")
     return tenant_engines[tenant_db_name]
@@ -73,7 +72,6 @@ def get_tenant_engine(tenant_db_name: str) -> Engine:
 def get_db(tenant_db_name: str):
     """
     Tenant veritabanı oturumu almak için bağımlılık fonksiyonu.
-    Artık sabit bir Engine kullanmaz, tenant_db_name ile dinamik bağlanır.
     """
     if tenant_db_name not in tenant_session_locals:
         engine = get_tenant_engine(tenant_db_name)
@@ -82,11 +80,9 @@ def get_db(tenant_db_name: str):
     
     db = tenant_session_locals[tenant_db_name]()
     try:
-        # Yeni mimaride get_db() fonksiyonunun nasıl çağrılacağı API rotalarında değişmelidir.
         yield db
     except Exception as e:
         logger.critical(f"Tenant DB ({tenant_db_name}) bağlantısı kurulamadı! Hata: {e}")
-        # Hata durumunda Tenant bağlantısı sıfırlanmalı
         if tenant_db_name in tenant_engines:
             tenant_engines[tenant_db_name].dispose()
             del tenant_engines[tenant_db_name]
