@@ -30,14 +30,17 @@ class BaseOrmModel(BaseModel): model_config = ConfigDict(from_attributes=True)
 
 class Firma(Base):
     __tablename__ = 'firmalar'
-    id = Column(Integer, primary_key=True, index=True)
-    firma_adi = Column(String(150), nullable=False, unique=True)
-    tenant_db_name = Column(String(100), unique=True, nullable=False)
-    kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id'), unique=True, nullable=True)
-    olusturma_tarihi = Column(DateTime, server_default=func.now())
-    aktif = Column(Boolean, default=True)
-    personeller = relationship("Kullanici", back_populates="firma", foreign_keys="[Kullanici.firma_id]")
-    kurucu_personel = relationship("Kullanici", foreign_keys="[Firma.kurucu_personel_id]", back_populates="kurdugu_firma", remote_side='Kullanici.id', uselist=False)
+
+    id = Column(Integer, primary_key=True)
+    firma_adi = Column(String(200), unique=True, nullable=False)
+    tenant_db_name = Column(String(200), unique=True, nullable=False)
+
+    # Bu ForeignKey tanımı doğru
+    kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id'))
+
+    # SQLAlchemy'ye hangi ForeignKey'i kullanacağını söylüyoruz
+    kullanicilar = relationship("Kullanici", back_populates="firma", foreign_keys="[Kullanici.firma_id]")
+    kurucu_personel = relationship("Kullanici", back_populates="kurdugu_firma", foreign_keys=[kurucu_personel_id])
 
 # --- SİRKET MODELLERİ (ORM) ---
 class SirketBilgileri(Base):
@@ -92,20 +95,27 @@ class Ayarlar(Base):
 # --- KULLANICI MODELLERİ (ORM) ---
 class Kullanici(Base):
     __tablename__ = 'kullanicilar'
-    id = Column(Integer, primary_key=True, index=True)
-    sifre_hash = Column(String(255), nullable=True)
-    ad = Column(String(50), nullable=False) 
-    soyad = Column(String(50), nullable=False) 
-    email = Column(String(100), unique=True, index=True, nullable=False) 
-    telefon = Column(String(20), unique=True, nullable=True) 
-    firma_id = Column(Integer, ForeignKey('firmalar.id'), nullable=True)
-    rol = Column(String(20), default="admin") 
+
+    id = Column(Integer, primary_key=True)
+    sifre_hash = Column(String(255))
+    ad = Column(String(50))
+    soyad = Column(String(50))
+    email = Column(String(100), unique=True)
+    telefon = Column(String(20))
+
+    # Bu ForeignKey tanımı doğru
+    firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True)
+    rol = Column(String(50), default='kullanici')
     aktif = Column(Boolean, default=True)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     son_giris_tarihi = Column(DateTime, nullable=True)
-    firma = relationship("Firma", foreign_keys=[firma_id], back_populates="personeller") 
-    kurdugu_firma = relationship("Firma", foreign_keys='Firma.kurucu_personel_id', back_populates="kurucu_personel", uselist=False)
-    master_ayarlar = relationship("Ayarlar", back_populates="kullanici", cascade="all, delete-orphan", foreign_keys="[Ayarlar.kullanici_id]")
+    # SQLAlchemy'ye hangi ForeignKey'i kullanacağını söylüyoruz
+    firma = relationship("Firma", back_populates="kullanicilar", foreign_keys=[firma_id])
+    # Diğer ilişkiler (bunlar doğru)
+    faturalar = relationship("Fatura", back_populates="kullanici")
+    stoklar = relationship("Stok", back_populates="kullanici")
+    kurdugu_firma = relationship("Firma", back_populates="kurucu_personel", foreign_keys=[Firma.kurucu_personel_id])
+    master_ayarlar = relationship("Ayarlar", back_populates="kullanici")
     
 class FirmaRead(BaseOrmModel): id: int; firma_adi: str; tenant_db_name: str; olusturma_tarihi: datetime
 
@@ -291,7 +301,39 @@ class KasaBankaListResponse(BaseModel):
 
 # --- STOK MODELLERİ (ORM) ---
 class Stok(Base):
-    __tablename__ = 'stoklar'; id = Column(Integer, primary_key=True); kod = Column(String(50)); ad = Column(String(200)); detay = Column(Text); miktar = Column(Float, default=0.0); alis_fiyati = Column(Float, default=0.0); satis_fiyati = Column(Float, default=0.0); kdv_orani = Column(Float, default=20.0); min_stok_seviyesi = Column(Float, default=0.0); aktif = Column(Boolean, default=True); urun_resmi_yolu = Column(String(255)); olusturma_tarihi = Column(DateTime, server_default=func.now()); kategori_id = Column(Integer, ForeignKey('urun_kategorileri.id')); marka_id = Column(Integer, ForeignKey('urun_markalari.id')); urun_grubu_id = Column(Integer, ForeignKey('urun_gruplari.id')); birim_id = Column(Integer, ForeignKey('urun_birimleri.id')); mense_id = Column(Integer, ForeignKey('ulkeler.id')); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'stoklar'
+
+    id = Column(Integer, primary_key=True)
+    kod = Column(String(50))
+    ad = Column(String(200))
+    detay = Column(Text)
+    miktar = Column(Float, default=0.0)
+    alis_fiyati = Column(Float, default=0.0)
+    satis_fiyati = Column(Float, default=0.0)
+    kdv_orani = Column(Float, default=20.0)
+    min_stok_seviyesi = Column(Float, default=0.0)
+    aktif = Column(Boolean, default=True)
+    urun_resmi_yolu = Column(String(255))
+    olusturma_tarihi = Column(DateTime, server_default=func.now())
+
+    kategori_id = Column(Integer, ForeignKey('urun_kategorileri.id'))
+    marka_id = Column(Integer, ForeignKey('urun_markalari.id'))
+    urun_grubu_id = Column(Integer, ForeignKey('urun_gruplari.id'))
+    birim_id = Column(Integer, ForeignKey('urun_birimleri.id'))
+    mense_id = Column(Integer, ForeignKey('ulkeler.id'))
+    kullanici_id = Column(Integer, ForeignKey('kullanicilar.id'), nullable=False)
+
+    kategori = relationship("UrunKategori", back_populates="stoklar")
+    marka = relationship("UrunMarka", back_populates="stoklar")
+    urun_grubu = relationship("UrunGrubu", back_populates="stoklar")
+    birim = relationship("UrunBirimi", back_populates="stoklar")
+    mense_ulke = relationship("Ulke", back_populates="stoklar")
+    kullanici = relationship("Kullanici", back_populates="stoklar")
+
+    hareketler = relationship("StokHareket", back_populates="urun", cascade="all, delete-orphan")
+    fatura_kalemleri = relationship("FaturaKalemi", back_populates="urun")
+
+    __table_args__ = (UniqueConstraint('kod', 'kullanici_id', name='unique_kod_kullanici'),)
 
 # Stok Modelleri (Pydantic)
 class StokBase(BaseOrmModel):
@@ -377,7 +419,9 @@ class Fatura(Base):
     kullanici_id = Column(Integer, nullable=False)
     kasa_banka = relationship("KasaBankaHesap", back_populates="faturalar")
     kalemler = relationship("FaturaKalemi", back_populates="fatura", cascade="all, delete-orphan")
-
+    kullanici_id = Column(Integer, ForeignKey('kullanicilar.id'), nullable=False)
+    kullanici = relationship("Kullanici", back_populates="faturalar")
+    
 class FaturaKalemi(Base):
     __tablename__ = 'fatura_kalemleri'
     id = Column(Integer, primary_key=True)
@@ -393,7 +437,7 @@ class FaturaKalemi(Base):
     iskonto_degeri = Column(Float, default=0.0)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     fatura = relationship("Fatura", back_populates="kalemler")
-    urun = relationship("Stok")
+    urun = relationship("Stok", back_populates="fatura_kalemleri")
 
 # Fatura Modelleri (Pydantic)
 class FaturaKalemiBase(BaseOrmModel):
@@ -496,7 +540,22 @@ class NextFaturaNoResponse(BaseModel):
 
 # --- STOK HAREKET MODELLERİ (ORM) ---
 class StokHareket(Base):
-    __tablename__ = 'stok_hareketleri'; id = Column(Integer, primary_key=True); tarih = Column(Date); urun_id = Column(Integer, ForeignKey('stoklar.id')); islem_tipi = Column(Enum(StokIslemTipiEnum)); miktar = Column(Float); birim_fiyat = Column(Float, default=0.0); onceki_stok = Column(Float); sonraki_stok = Column(Float); aciklama = Column(Text); kaynak = Column(String(50)); kaynak_id = Column(Integer); olusturma_tarihi = Column(DateTime, server_default=func.now()); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'stok_hareketleri'
+
+    id = Column(Integer, primary_key=True)
+    tarih = Column(Date)
+    urun_id = Column(Integer, ForeignKey('stoklar.id'), nullable=False)
+    islem_tipi = Column(Enum(StokIslemTipiEnum))
+    miktar = Column(Float)
+    birim_fiyat = Column(Float, default=0.0)
+    onceki_stok = Column(Float)
+    sonraki_stok = Column(Float)
+    aciklama = Column(Text)
+    kaynak = Column(String(50))
+    kaynak_id = Column(Integer)
+    olusturma_tarihi = Column(DateTime, server_default=func.now())
+    kullanici_id = Column(Integer, nullable=False)
+    urun = relationship("Stok", back_populates="hareketler")
 
 # Stok Hareket Modelleri (Pydantic)
 class StokHareketBase(BaseOrmModel):
@@ -820,19 +879,39 @@ class KasaBankaHareketListResponse(BaseModel):
 
 # --- NİTELİK MODELLERİ (ORM) ---
 class UrunKategori(Base):
-    __tablename__ = 'urun_kategorileri'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'urun_kategorileri'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
+    stoklar = relationship("Stok", back_populates="kategori")
 
 class UrunMarka(Base):
-    __tablename__ = 'urun_markalari'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'urun_markalari'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
+    stoklar = relationship("Stok", back_populates="marka")
 
 class UrunGrubu(Base):
-    __tablename__ = 'urun_gruplari'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'urun_gruplari'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
+    stoklar = relationship("Stok", back_populates="urun_grubu")
 
 class UrunBirimi(Base):
-    __tablename__ = 'urun_birimleri'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'urun_birimleri'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(50))
+    kullanici_id = Column(Integer, nullable=False)
+    stoklar = relationship("Stok", back_populates="birim")
 
 class Ulke(Base):
-    __tablename__ = 'ulkeler'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'ulkeler'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
+    stoklar = relationship("Stok", back_populates="mense_ulke")
 
 class UrunNitelik(Base):
     __tablename__ = 'urun_nitelikleri'
@@ -845,11 +924,17 @@ class UrunNitelik(Base):
     kullanici = relationship("Kullanici", foreign_keys=[kullanici_id], viewonly=True)
 
 class GelirSiniflandirma(Base):
-    __tablename__ = 'gelir_siniflandirmalari'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
+    __tablename__ = 'gelir_siniflandirmalari'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
 
 class GiderSiniflandirma(Base):
-    __tablename__ = 'gider_siniflandirmalari'; id = Column(Integer, primary_key=True); ad = Column(String(100)); kullanici_id = Column(Integer, nullable=False)
-    
+    __tablename__ = 'gider_siniflandirmalari'
+    id = Column(Integer, primary_key=True)
+    ad = Column(String(100))
+    kullanici_id = Column(Integer, nullable=False)
+
 class Nitelik(Base):
     __tablename__ = 'nitelikler'
     id = Column(Integer, primary_key=True, index=True)
@@ -859,11 +944,22 @@ class Nitelik(Base):
     aktif_durum = Column(Boolean, default=True)
 
 class CariHesap(Base):
-    __tablename__ = 'cari_hesaplar'; id = Column(Integer, primary_key=True); cari_id = Column(Integer); cari_tip = Column(String(20)); bakiye = Column(Float, default=0.0)
+    __tablename__ = 'cari_hesaplar'
+    id = Column(Integer, primary_key=True)
+    cari_id = Column(Integer)
+    cari_tip = Column(String(20))
+    bakiye = Column(Float, default=0.0)
 
 class SenkronizasyonKuyrugu(Base):
-    __tablename__ = 'senkronizasyon_kuyrugu'; id = Column(Integer, primary_key=True); kaynak_tablo = Column(String); kaynak_id = Column(Integer); islem_tipi = Column(String); veri = Column(Text); islem_tarihi = Column(DateTime, default=func.now()); senkronize_edildi = Column(Boolean, default=False)
-    
+    __tablename__ = 'senkronizasyon_kuyrugu'
+    id = Column(Integer, primary_key=True)
+    kaynak_tablo = Column(String)
+    kaynak_id = Column(Integer)
+    islem_tipi = Column(String)
+    veri = Column(Text)
+    islem_tarihi = Column(DateTime, default=func.now())
+    senkronize_edildi = Column(Boolean, default=False)
+
 # --- NİTELİK MODELLERİ (PYDANTIC) ---
 class NitelikBase(BaseModel):
     ad: str

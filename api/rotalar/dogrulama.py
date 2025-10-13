@@ -23,9 +23,6 @@ def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
     logger.info(f"Yeni Tenant DB için varsayılan veriler ekleniyor. Master Kullanıcı ID: {olusturan_kullanici_id}")
 
     try:
-        # --- NİHAİ DÜZELTME: TENANT'IN İLK KULLANICISINI OLUŞTUR ---
-        # Master DB'deki kurucu kullanıcının bilgilerini alıp Tenant'ın kendi
-        # kullanicilar tablosuna ilk kaydı (ID=1 olacak şekilde) ekliyoruz.
         master_db = next(get_master_db())
         kurucu_kullanici = master_db.query(modeller.Kullanici).filter(modeller.Kullanici.id == olusturan_kullanici_id).first()
         master_db.close()
@@ -33,41 +30,35 @@ def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
         if not kurucu_kullanici:
             raise Exception(f"Master DB'de ID'si {olusturan_kullanici_id} olan kurucu kullanıcı bulunamadı.")
 
-        # Tenant'ın kendi içindeki ilk kullanıcı kaydı
+        # --- KRİTİK DEĞİŞİKLİK: firma_id olmadan kullanıcı oluşturma ---
+        # Tenant DB içindeki kullanıcının firma ile bir bağlantısı yoktur.
         tenant_ilk_kullanici = modeller.Kullanici(
-            id=1, # Manuel olarak ID'yi 1 olarak belirliyoruz
+            id=1, 
             ad=kurucu_kullanici.ad,
             soyad=kurucu_kullanici.soyad,
             email=kurucu_kullanici.email,
-            sifre_hash=kurucu_kullanici.sifre_hash, # Şifre hash'i master'dan alınır
-            rol="yonetici", # Tenant içindeki rolü
-            firma_id=kurucu_kullanici.firma_id # Bu bilgi master'daki firma ID'sidir, tenant içinde anlamı olmayabilir ama tutarlılık için ekleyebiliriz.
+            sifre_hash=kurucu_kullanici.sifre_hash,
+            rol="yonetici"
+            # firma_id BURADAN KALDIRILDI!
         )
         db.add(tenant_ilk_kullanici)
-        # Önce bu kullanıcıyı commit'leyerek veritabanında var olmasını sağlıyoruz.
         db.commit()
         db.refresh(tenant_ilk_kullanici)
         logger.info(f"Tenant DB için ilk kullanıcı '{tenant_ilk_kullanici.email}' ID=1 ile başarıyla oluşturuldu.")
-        # --- DÜZELTME SONU ---
-
-        # Artık tenant içinde ID'si 1 olan bir kullanıcı olduğu için aşağıdaki kayıtlar başarılı olacaktır.
-        # Tüm kayıtlarda kullanici_id=1 kullanılacak.
+        
         TENANT_USER_ID = 1
 
-        # 1. CARİLER
         perakende_musteri = modeller.Musteri(ad="Perakende Müşterisi", kod="PERAKENDE_MUSTERI", aktif=True, kullanici_id=TENANT_USER_ID)
         db.add(perakende_musteri)
         
         genel_tedarikci = modeller.Tedarikci(ad="Genel Tedarikçi", kod="GENEL_TEDARIKCI", aktif=True, kullanici_id=TENANT_USER_ID)
         db.add(genel_tedarikci)
 
-        # Diğer varsayılan veriler...
         db.add(modeller.KasaBankaHesap(hesap_adi="NAKİT KASA", tip=modeller.KasaBankaTipiEnum.KASA, bakiye=0.0, para_birimi="TL", aktif=True, kullanici_id=TENANT_USER_ID))
         db.add(modeller.UrunBirimi(ad="Adet", kullanici_id=TENANT_USER_ID))
         
-        db.commit() # Commit'i buraya alalım
+        db.commit()
         
-        # CariHesap'ları commit'ten sonra ekleyelim
         db.refresh(perakende_musteri)
         db.refresh(genel_tedarikci)
         db.add(modeller.CariHesap(cari_id=perakende_musteri.id, cari_tip=modeller.CariTipiEnum.MUSTERI.value, bakiye=0.0))
@@ -78,7 +69,7 @@ def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Varsayılan veriler Tenant DB'ye eklenirken kritik bir hata oluştu: {e}")
+        logger.error(f"Varsayılan veriler Tenant DB'ye eklenirken kritik bir hata oluştu: {e}", exc_info=True)
         raise
 
 # --- ROTALAR ---
@@ -86,8 +77,6 @@ def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
 @router.post("/login", response_model=modeller.OfflineLoginResponse)
 def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends(get_master_db)):
     
-    # --- NİHAİ DÜZELTME BURADA ---
-    # Sorguya, Kullanici ile birlikte Firma verisini de "hemen yükle" komutunu ekliyoruz.
     user = db.query(modeller.Kullanici).options(
         joinedload(modeller.Kullanici.firma) 
     ).filter(
@@ -97,12 +86,41 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
     if not user or not verify_password(user_login.sifre, user.sifre_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Hatalı e-posta veya şifre.")
     
-    # "joinedload" sayesinde user.firma artık dolu ve kontrol edilebilir olacaktır.
     if not user.firma or not user.firma.tenant_db_name:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Kullanıcının Tenant/Firma bilgisi eksik.")
 
     tenant_db_name = user.firma.tenant_db_name
     firma_adi = user.firma.firma_adi
+
+    try:
+        tenant_engine = get_tenant_engine(tenant_db_name)
+        with tenant_engine.connect() as connection:
+            logger.info(f"Tenant veritabanı '{tenant_db_name}' zaten mevcut, bağlantı başarılı.")
+    except Exception:
+        logger.warning(f"Tenant veritabanı '{tenant_db_name}' bulunamadı. Veritabanı şimdi oluşturulacak...")
+        try:
+            master_engine = get_master_engine()
+            with master_engine.connect() as conn:
+                conn.execution_options(isolation_level="AUTOCOMMIT").execute(
+                    text(f"CREATE DATABASE {tenant_db_name} ENCODING 'UTF8' TEMPLATE template0;")
+                )
+            
+            tenant_engine_new = get_tenant_engine(tenant_db_name)
+            modeller.Base.metadata.create_all(bind=tenant_engine_new)
+            
+            TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=tenant_engine_new)
+            tenant_db_session = TenantSessionLocal()
+            try:
+                _add_default_tenant_data(tenant_db_session, olusturan_kullanici_id=user.id)
+                logger.info(f"Yeni tenant veritabanı '{tenant_db_name}' ve varsayılan veriler başarıyla oluşturuldu.")
+            finally:
+                tenant_db_session.close()
+        except Exception as creation_error:
+            logger.error(f"Tenant veritabanı '{tenant_db_name}' oluşturulurken kritik hata: {creation_error}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Giriş sırasında firma veritabanı oluşturulamadı."
+            )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

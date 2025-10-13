@@ -1,4 +1,4 @@
-# api/veritabani.py Dosyasının TAM İÇERİĞİ (pool_pre_ping eklendi)
+# api/veritabani.py Dosyasının TAM İÇERİĞİ 
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text

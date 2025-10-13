@@ -1,4 +1,4 @@
-# veritabani.py dosyasının TAMAMI (SessionLocal hatası çözüldü)
+# (ana dizindeki) veritabani.py dosyasının TAM İÇERİĞİ
 from hizmetler import lokal_db_servisi 
 import requests
 import json

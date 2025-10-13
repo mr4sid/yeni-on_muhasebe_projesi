@@ -1,24 +1,22 @@
-# api/guvenlik.py (Database-per-Tenant ve Email Girişine Uyarlandı)
+# api/guvenlik.py dosyasının tam içeriği
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
-# DÜZELTME: OAuth2PasswordRequestForm eklendi
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm 
+from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session, joinedload 
+from sqlalchemy.orm import Session, joinedload
 
-# DÜZELTME: Doğru içe aktarma yolları kullanıldı
-from . import modeller 
-from .veritabani import get_master_db # <<< Sadece Master DB bağlantısı kullanılır
+from . import modeller
+from .veritabani import get_master_db # Bu import artık güvende
 from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Şifre karma oluşturma (hashing) bağlamı
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT şeması (Giriş e-posta ile yapılacaktır)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="dogrulama/login") 
+# JWT şeması
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="dogrulama/login")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
@@ -46,11 +44,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def get_current_user(token: str = Depends(oauth2_scheme), master_db: Session = Depends(get_master_db)):
-    """
-    JWT token'ı kullanarak geçerli kullanıcıyı doğrular ve döndürür.
-    Token payload'ı: {'sub': email, 'tenant_db': tenant_db_name}
-    """
+def get_token_payload(token: str = Depends(oauth2_scheme)) -> dict:
+    """JWT token'ı doğrular ve payload'ı (içeriği) döndürür."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Kimlik bilgileri doğrulanamadı",
@@ -58,14 +53,31 @@ def get_current_user(token: str = Depends(oauth2_scheme), master_db: Session = D
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub") # <<< E-posta beklenir
-        tenant_db_name: str = payload.get("tenant_db") 
+        email: str = payload.get("sub")
+        tenant_db_name: str = payload.get("tenant_db")
         if email is None or tenant_db_name is None:
             raise credentials_exception
+        return payload
     except JWTError:
         raise credentials_exception
+
+def get_current_user(
+    payload: dict = Depends(get_token_payload),
+    master_db: Session = Depends(get_master_db)
+) -> modeller.KullaniciRead:
+    """
+    Token payload'ını ve master_db'yi kullanarak geçerli kullanıcıyı doğrular ve
+    Pydantic modeli olarak döndürür.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Kullanıcı bulunamadı veya geçersiz.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     
-    # Master DB'den kullanıcıyı ve firmayı tek sorguyla çek
+    email: str = payload.get("sub")
+    tenant_db_name: str = payload.get("tenant_db")
+
     user = master_db.query(modeller.Kullanici).options(
         joinedload(modeller.Kullanici.firma)
     ).filter(
@@ -75,10 +87,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), master_db: Session = D
     if user is None:
         raise credentials_exception
         
-    # Kullanıcı objesini Pydantic'e çevir ve tenant bilgisini ekle
     user_read_data = modeller.KullaniciRead.model_validate(user, from_attributes=True)
     
-    # KRİTİK: Tenant bilgisini ve Firma adını Pydantic modele elle ekle
     user_read_data.tenant_db_name = tenant_db_name
     if user.firma:
         user_read_data.firma_adi = user.firma.firma_adi

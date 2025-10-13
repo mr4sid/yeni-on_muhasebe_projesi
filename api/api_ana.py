@@ -1,17 +1,16 @@
 # api/api_ana.py dosyasının TAMAMI (Database-per-Tenant Uyumlu Import ve Yaşam Döngüsü)
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker 
 from sqlalchemy import text 
 import logging
 from datetime import datetime
 from contextlib import asynccontextmanager 
 from typing import AsyncGenerator
 from sqlalchemy.future import create_engine 
-from sqlalchemy.orm import sessionmaker 
 # KRİTİK DÜZELTME 1: SessionLocal ve get_db kaldırıldı. Master DB fonksiyonları eklendi.
 from .veritabani import get_master_db, get_master_engine 
-from api import modeller
+from api import modeller, veritabani, guvenlik
 # Başlangıç verileri için kullanılacak modeller
 from api.modeller import (
     Base, Kullanici, Firma, Ayarlar # Master DB'deki modeller
@@ -33,6 +32,21 @@ logger = logging.getLogger(__name__)
 engine = get_master_engine()
 
 # Uygulama başladıktan sonra çalışacak olay
+
+def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)) -> Session:
+    """
+    Token'dan tenant adını alır ve ilgili veritabanı oturumunu döndürür.
+    Bu fonksiyon, tüm tenant'a özel rotalar için merkezi bağımlılık noktasıdır.
+    """
+    tenant_db_name = payload.get("tenant_db")
+    if not tenant_db_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token içinde Tenant veritabanı adı (tenant_db) bulunamadı."
+        )
+    # veritabani.py'deki orijinal get_db fonksiyonunu çağırıyoruz
+    return next(veritabani.get_db(tenant_db_name))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """

@@ -1,10 +1,10 @@
-# api/rotalar/stoklar.py dosyasının TAMAMI (Database-per-Tenant ve Temizlik Uygulandı)
+# api/rotalar/stoklar.py dosyasının TAM İÇERİĞİ
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload 
 from sqlalchemy import func, and_, or_
 from .. import modeller, guvenlik 
 # KRİTİK DÜZELTME 1: Tenant DB'ye dinamik bağlanacak yeni bağımlılık kullanıldı.
-from ..veritabani import get_db as get_tenant_db
+from .. import veritabani
 from typing import List, Optional, Any
 from datetime import datetime, date
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -17,15 +17,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stoklar", tags=["Stoklar"])
 
-# KRİTİK DÜZELTME 2: Tenant DB bağlantısı için kullanılacak bağımlılık
-TENANT_DB_DEPENDENCY = get_tenant_db
+def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
+    """Token'dan tenant adını alır ve ilgili veritabanı oturumunu döndürür."""
+    tenant_name = payload.get("tenant_db")
+    if not tenant_name:
+        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
+    yield from veritabani.get_db(tenant_name)
 
 
 @router.post("/", response_model=modeller.StokRead)
 def create_stok(
     stok: modeller.StokCreate,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db)
 ):
     try:
         stok_data = stok.model_dump(exclude={'kullanici_id', 'id'})
@@ -81,7 +85,7 @@ def read_stoklar(
     marka_id: Optional[int] = None,
     urun_grubu_id: Optional[int] = None,
     stokta_var: Optional[bool] = None,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     query = db.query(modeller.Stok).options(
@@ -131,7 +135,7 @@ def read_stoklar(
 
 @router.get("/ozet", response_model=modeller.StokOzetResponse)
 def get_stok_ozet(
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
@@ -153,7 +157,7 @@ def get_stok_ozet(
 @router.get("/{stok_id}", response_model=modeller.StokRead)
 def read_stok(
     stok_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
@@ -191,7 +195,7 @@ def read_stok(
 def update_stok(
     stok_id: int,
     stok: modeller.StokUpdate,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
@@ -209,7 +213,7 @@ def update_stok(
 @router.delete("/{stok_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stok(
     stok_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 9: IZOLASYON FILTRESI KALDIRILDI!
@@ -225,7 +229,7 @@ def delete_stok(
 @router.get("/{stok_id}/anlik_miktar", response_model=modeller.AnlikStokMiktariResponse)
 def get_anlik_stok_miktari_endpoint(
     stok_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 10: IZOLASYON FILTRESI KALDIRILDI!
@@ -241,7 +245,7 @@ def get_anlik_stok_miktari_endpoint(
 def create_stok_hareket(
     stok_id: int,
     hareket: modeller.StokHareketCreate,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 11: IZOLASYON FILTRESI KALDIRILDI!
@@ -311,7 +315,7 @@ def get_stok_hareketleri_endpoint(
     islem_tipi: str = Query(None),
     baslangic_tarihi: str = Query(None),
     bitis_tarihi: str = Query(None),
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 13: IZOLASYON FILTRESI KALDIRILDI!
@@ -337,7 +341,7 @@ def get_stok_hareketleri_endpoint(
 @router.delete("/hareketler/{hareket_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stok_hareket(
     hareket_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     # KRİTİK DÜZELTME 14: IZOLASYON FILTRESI KALDIRILDI!
@@ -373,7 +377,7 @@ def delete_stok_hareket(
 @router.post("/bulk_upsert", response_model=modeller.TopluIslemSonucResponse)
 def bulk_stok_upsert_endpoint(
     stok_listesi: List[modeller.StokCreate],
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(get_current_user)
 ):
     db.begin_nested()
@@ -552,7 +556,7 @@ def list_stok_hareketleri_endpoint(
     bitis_tarihi: Optional[date] = Query(None),
     skip: int = 0,
     limit: int = 1000,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 22: IZOLASYON FILTRESI KALDIRILDI!

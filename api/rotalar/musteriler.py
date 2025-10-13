@@ -1,39 +1,32 @@
-# api/rotalar/musteriler.py dosyasının TAMAMI (Database-per-Tenant Uyumlu)
+# api/rotalar/musteriler.py dosyasının TAM İÇERİĞİ
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_, or_
-from .. import modeller, guvenlik 
-# KRİTİK DÜZELTME 1: Tenant DB'ye dinamik bağlanacak yeni bağımlılık kullanıldı.
-from ..veritabani import get_db as get_tenant_db # get_db'yi get_tenant_db olarak kullanıyoruz.
+from sqlalchemy import func, or_
+from .. import modeller, guvenlik, veritabani
 from ..api_servisler import CariHesaplamaService
-from typing import List, Optional, Any
-from datetime import datetime
+from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(prefix="/musteriler", tags=["Müşteriler"])
 
-# KRİTİK DÜZELTME 2: Tenant DB bağlantısı için kullanılacak bağımlılık
-TENANT_DB_DEPENDENCY = get_tenant_db
+def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
+    """Token'dan tenant adını alır ve ilgili veritabanı oturumunu döndürür."""
+    tenant_name = payload.get("tenant_db")
+    if not tenant_name:
+        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
+    yield from veritabani.get_db(tenant_name)
 
 @router.post("/", response_model=modeller.MusteriRead)
 def create_musteri(
     musteri: modeller.MusteriCreate,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db)
 ):
     try:
-        # Kod otomatik olarak API tarafından atanıyorsa
-        if not musteri.kod:
-            # Otomatik kod atama mantığı burada olmalı (API tarafından halledilir)
-            pass
-
-        # KRİTİK DÜZELTME 3: Tenant DB'de Kurucu Personelin ID'si her zaman 1'dir.
         db_musteri = modeller.Musteri(**musteri.model_dump(exclude_unset=True), kullanici_id=1)
-        
         db.add(db_musteri)
-        db.flush() # ID'yi almak için
+        db.flush()
         
-        # Cari hesap kaydı oluşturulur
         db_cari_hesap = modeller.CariHesap(
             cari_id=db_musteri.id, 
             cari_tip=modeller.CariTipiEnum.MUSTERI.value, 
@@ -42,7 +35,6 @@ def create_musteri(
         db.add(db_cari_hesap)
         db.commit()
         db.refresh(db_musteri)
-
         return modeller.MusteriRead.model_validate(db_musteri, from_attributes=True)
     
     except IntegrityError as e:
@@ -54,14 +46,13 @@ def create_musteri(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Müşteri kaydı oluşturulurken beklenmedik hata: {str(e)}")
 
-
 @router.get("/", response_model=modeller.MusteriListResponse)
 def read_musteriler(
     skip: int = 0,
     limit: int = 25,
     arama: Optional[str] = None,
     aktif_durum: Optional[bool] = None,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 4: IZOLASYON FILTRESI KALDIRILDI!
@@ -115,7 +106,7 @@ def read_musteriler(
 @router.get("/{musteri_id}", response_model=modeller.MusteriRead)
 def read_musteri(
     musteri_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
@@ -146,7 +137,7 @@ def read_musteri(
 def update_musteri(
     musteri_id: int,
     musteri: modeller.MusteriUpdate,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
@@ -186,7 +177,7 @@ def update_musteri(
 @router.delete("/{musteri_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_musteri(
     musteri_id: int,
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
@@ -211,7 +202,7 @@ def delete_musteri(
 
 @router.get("/kod_sirasi/next", response_model=modeller.NextCodeResponse)
 def get_next_musteri_kod(
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
