@@ -54,57 +54,48 @@ def read_kasalar_bankalar(
 def create_kasa_banka(
     hesap: modeller.KasaBankaCreate,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(TENANT_DB_DEPENDENCY)
 ):
     try:
-        # KRİTİK DÜZELTME 4: Boş stringleri None'a çevir (Postgresql Unique hatasını çözmek için)
-        hesap_data = _convert_empty_to_none(hesap.model_dump(exclude_unset=True, exclude={'acilis_bakiyesi'}))
+        # acilis_bakiyesi'ni modelden alıp geri kalan veriyi ayırıyoruz
+        hesap_dict = hesap.model_dump()
+        acilis_bakiyesi = hesap_dict.pop('acilis_bakiyesi', 0.0)
         
-        # KRİTİK DÜZELTME 5: Tenant DB'de Kurucu Personelin ID'si her zaman 1'dir.
+        hesap_data = _convert_empty_to_none(hesap_dict)
+
         db_hesap = modeller.KasaBankaHesap(
             **hesap_data,
-            kullanici_id=1 
+            kullanici_id=1,
+            bakiye=acilis_bakiyesi  # Bakiye doğrudan açılış bakiyesinden ayarlanıyor
         )
-        # acilis_bakiyesi kontrolü
-        if hasattr(hesap, 'acilis_bakiyesi') and hesap.acilis_bakiyesi is not None:
-             db_hesap.bakiye = hesap.acilis_bakiyesi
-
         db.add(db_hesap)
-        db.flush() 
+        db.flush()
 
-        # Cari hareket oluşturma işlemi
-        if hasattr(hesap, 'acilis_bakiyesi') and hesap.acilis_bakiyesi != 0:
-            islem_yone = modeller.IslemYoneEnum.GIRIS if hesap.acilis_bakiyesi > 0 else modeller.IslemYoneEnum.CIKIS
+        # Açılış bakiyesi varsa, doğru şekilde KasaBankaHareket oluşturuluyor
+        if acilis_bakiyesi and acilis_bakiyesi != 0:
+            islem_yone = modeller.IslemYoneEnum.GIRIS if acilis_bakiyesi > 0 else modeller.IslemYoneEnum.CIKIS
             
-            db_cari_hareket = modeller.CariHareket(
+            db_kasa_hareket = modeller.KasaBankaHareket(
                 tarih=date.today(),
-                cari_tip=db_hesap.tip.value, 
-                cari_id=db_hesap.id,
+                kasa_banka_id=db_hesap.id,
                 islem_turu="AÇILIŞ BAKİYESİ",
                 islem_yone=islem_yone,
-                tutar=abs(hesap.acilis_bakiyesi),
-                aciklama="Açılış Bakiyesi",
+                tutar=abs(acilis_bakiyesi),
+                aciklama="Hesap Açılış Bakiyesi",
                 kaynak=modeller.KaynakTipEnum.MANUEL,
-                kasa_banka_id=db_hesap.id,
-                kullanici_id=1 # Tenant DB'deki Personel ID'si 1
+                kullanici_id=1
             )
-            db.add(db_cari_hareket)
-            
+            db.add(db_kasa_hareket)
+
         db.commit()
         db.refresh(db_hesap)
         return db_hesap
     except IntegrityError as e:
         db.rollback()
-        # Hata mesajlarını daha kullanıcı dostu hale getir (önceki düzeltmelerden kalan)
-        if "hesap_no" in str(e) and "ix_kasalar_bankalar_hesap_no" in str(e):
-             raise HTTPException(status_code=400, detail="Bu hesap numarası/IBAN zaten kullanılıyor veya boş bırakılamaz.")
         if "hesap_adi" in str(e) or "unique_hesap_adi" in str(e):
              raise HTTPException(status_code=400, detail="Bu hesap adı zaten kullanılıyor.")
-
-        raise HTTPException(status_code=400, detail=f"Veritabanı bütünlük hatası: {str(e)}")
-    except SQLAlchemyError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Veritabanı işlemi sırasında hata oluştu: {str(e)}")
+        # Diğer IntegrityError'lar için genel bir mesaj
+        raise HTTPException(status_code=400, detail="Bu bilgilere sahip bir kayıt zaten mevcut. Lütfen kod, hesap no gibi alanları kontrol edin.")
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Kasa/Banka hesabı oluşturulurken beklenmedik bir hata oluştu: {str(e)}")

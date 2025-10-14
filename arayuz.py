@@ -187,6 +187,24 @@ class AnaSayfa(QWidget):
         
         self.guncelle_ozet_bilgiler()
 
+    def closeEvent(self, event):
+        """
+        Pencere kapatılmaya çalışıldığında bu fonksiyon otomatik olarak çağrılır.
+        Kullanıcıya bir onay penceresi gösterir.
+        """
+        yanit = QMessageBox.question(self, 
+                                     'Çıkışı Onayla', 
+                                     "Programı kapatmak istediğinizden emin misiniz?", 
+                                     QMessageBox.Yes | QMessageBox.No, 
+                                     QMessageBox.No)
+
+        if yanit == QMessageBox.Yes:
+            # Kullanıcı "Evet" derse, kapatma olayını kabul et ve programı kapat.
+            event.accept()
+        else:
+            # Kullanıcı "Hayır" derse, kapatma olayını yoksay ve pencereyi açık tut.
+            event.ignore()
+
     def _create_metric_card(self, parent_frame, title, initial_value, card_type):
         card_frame = QFrame(parent_frame)
         card_frame.setFrameShape(QFrame.StyledPanel)

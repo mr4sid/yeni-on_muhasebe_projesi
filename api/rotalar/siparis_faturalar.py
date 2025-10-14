@@ -11,12 +11,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
-    tenant_name = payload.get("tenant_db")
-    if not tenant_name:
-        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
-    yield from veritabani.get_db(tenant_name)
-
 siparisler_router = APIRouter(prefix="/siparisler", tags=["Siparişler"])
 faturalar_router = APIRouter(prefix="/faturalar", tags=["Faturalar"])
 router = APIRouter()
@@ -27,7 +21,7 @@ router.include_router(faturalar_router)
 @siparisler_router.post("/", response_model=modeller.SiparisRead, status_code=status.HTTP_201_CREATED)
 def create_siparis(
     siparis: modeller.SiparisCreate, 
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 3: Tenant DB'de Kurucu Personelin ID'si her zaman 1'dir.
@@ -71,7 +65,7 @@ def read_siparisler(
     siparis_turu: Optional[modeller.SiparisTuruEnum] = None, # DÜZELTME: modeller.SiparisTuruEnum kullanıldı
     baslangic_tarih: Optional[date] = None,
     bitis_tarih: Optional[date] = None,
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.Siparis) \
@@ -114,7 +108,7 @@ def read_siparisler(
 def delete_siparis(
     siparis_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
     db_siparis = db.query(modeller.Siparis).filter(modeller.Siparis.id == siparis_id).first()
@@ -130,7 +124,7 @@ def update_siparis(
     siparis_id: int, 
     siparis_update: modeller.SiparisUpdate, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
     db_siparis = db.query(modeller.Siparis).filter(modeller.Siparis.id == siparis_id).first()
@@ -158,7 +152,7 @@ def update_siparis(
 def read_siparis(
     siparis_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
     siparis = db.query(modeller.Siparis) \
@@ -172,7 +166,7 @@ def read_siparis(
 def convert_siparis_to_fatura(
     siparis_id: int, 
     fatura_donusum: modeller.SiparisFaturaDonusum,
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 9: IZOLASYON FILTRESI KALDIRILDI!
     db_siparis = db.query(modeller.Siparis).filter(modeller.Siparis.id == siparis_id).first()
@@ -405,7 +399,7 @@ def read_faturalar(
     cari_id: int = Query(None),
     odeme_turu: Optional[modeller.OdemeTuruEnum] = Query(None), # DÜZELTME
     kasa_banka_id: Optional[int] = Query(None),
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 17: IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.Fatura) \
@@ -450,7 +444,7 @@ def read_faturalar(
 def read_fatura(
     fatura_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 18: IZOLASYON FILTRESI KALDIRILDI!
     fatura = db.query(modeller.Fatura).filter(modeller.Fatura.id == fatura_id).first()
@@ -463,7 +457,7 @@ def update_fatura(
     fatura_id: int, 
     fatura: modeller.FaturaUpdate, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     KULLANICI_ID = 1 # Tenant ID
     # KRİTİK DÜZELTME 19: IZOLASYON FILTRESI KALDIRILDI!
@@ -674,7 +668,7 @@ def read_faturalar(
     cari_id: int = Query(None),
     odeme_turu: Optional[modeller.OdemeTuruEnum] = Query(None),
     kasa_banka_id: Optional[int] = Query(None),
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 20: IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.Fatura) \
@@ -721,7 +715,7 @@ def read_faturalar(
 def read_fatura(
     fatura_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 21: IZOLASYON FILTRESI KALDIRILDI!
     fatura = db.query(modeller.Fatura).filter(modeller.Fatura.id == fatura_id).first()
@@ -733,7 +727,7 @@ def read_fatura(
 def delete_fatura(
     fatura_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     KULLANICI_ID = 1 # Tenant ID
     # KRİTİK DÜZELTME 22: IZOLASYON FILTRESI KALDIRILDI!
@@ -807,7 +801,7 @@ def delete_fatura(
 def get_next_fatura_number_endpoint(
     fatura_turu: str = Query(..., description="Fatura türünün Enum üye adı (örn: SATIS, ALIS)"),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     try:
         fatura_turu_enum = modeller.FaturaTuruEnum[fatura_turu.upper()]
@@ -844,7 +838,7 @@ def get_next_fatura_number_endpoint(
 def get_fatura_kalemleri_endpoint(
     fatura_id: int,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 24: IZOLASYON FILTRESI KALDIRILDI!
     fatura = db.query(modeller.Fatura).filter(modeller.Fatura.id == fatura_id).first()
@@ -887,7 +881,7 @@ def get_fatura_kalemleri_endpoint(
 def get_urun_faturalari_endpoint(
     urun_id: int,
     fatura_turu: str = Query(None),
-    db: Session = Depends(get_tenant_db) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 26: semalar.X yerine modeller.X kullanıldı ve IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.Fatura).join(modeller.FaturaKalemi).filter(modeller.FaturaKalemi.urun_id == urun_id)

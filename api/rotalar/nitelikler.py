@@ -1,4 +1,4 @@
-# api/rotalar/nitelikler.py Dosyasının tam
+# api/rotalar/nitelikler.py Dosyasının tam içeriği
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from .. import modeller, guvenlik, veritabani
@@ -6,15 +6,9 @@ from typing import List, Optional
 
 router = APIRouter(prefix="/nitelikler", tags=["Nitelikler"])
 
-def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
-    tenant_name = payload.get("tenant_db")
-    if not tenant_name:
-        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
-    yield from veritabani.get_db(tenant_name)
-
 # Kategori endpointleri
 @router.post("/kategoriler/", response_model=modeller.UrunKategoriRead)
-def create_kategori(kategori: modeller.UrunKategoriCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_kategori(kategori: modeller.UrunKategoriCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     db_kategori = modeller.UrunKategori(**kategori.model_dump(), kullanici_id=1)
     db.add(db_kategori)
     db.commit()
@@ -22,7 +16,7 @@ def create_kategori(kategori: modeller.UrunKategoriCreate, db: Session = Depends
     return db_kategori
 
 @router.get("/kategoriler", response_model=modeller.NitelikListResponse)
-def read_kategoriler(skip: int = 0, limit: int = 1000, arama: str = Query(None), db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_kategoriler(skip: int = 0, limit: int = 1000, arama: str = Query(None), db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     query = db.query(modeller.UrunKategori)
     if arama:
         query = query.filter(modeller.UrunKategori.ad.ilike(f"%{arama}%"))
@@ -31,14 +25,14 @@ def read_kategoriler(skip: int = 0, limit: int = 1000, arama: str = Query(None),
     return {"items": [modeller.UrunKategoriRead.model_validate(k, from_attributes=True) for k in kategoriler], "total": total_count}
 
 @router.get("/kategoriler/{kategori_id}", response_model=modeller.UrunKategoriRead)
-def read_kategori(kategori_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_kategori(kategori_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     kategori = db.query(modeller.UrunKategori).filter(modeller.UrunKategori.id == kategori_id).first()
     if not kategori:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kategori bulunamadı")
     return kategori
 
 @router.put("/kategoriler/{kategori_id}", response_model=modeller.UrunKategoriRead)
-def update_kategori(kategori_id: int, kategori: modeller.UrunKategoriUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_kategori(kategori_id: int, kategori: modeller.UrunKategoriUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     db_kategori = db.query(modeller.UrunKategori).filter(modeller.UrunKategori.id == kategori_id).first()
     if not db_kategori:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kategori bulunamadı")
@@ -49,7 +43,7 @@ def update_kategori(kategori_id: int, kategori: modeller.UrunKategoriUpdate, db:
     return db_kategori
 
 @router.delete("/kategoriler/{kategori_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_kategori(kategori_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_kategori(kategori_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     db_kategori = db.query(modeller.UrunKategori).filter(modeller.UrunKategori.id == kategori_id).first()
     if not db_kategori:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kategori bulunamadı")
@@ -60,7 +54,7 @@ def delete_kategori(kategori_id: int, db: Session = Depends(get_tenant_db), curr
 
 # Marka endpointleri
 @router.post("/markalar/", response_model=modeller.UrunMarkaRead)
-def create_marka(marka: modeller.UrunMarkaCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_marka(marka: modeller.UrunMarkaCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     db_marka = modeller.UrunMarka(**marka.model_dump(), kullanici_id=1)
     db.add(db_marka)
     db.commit()
@@ -68,7 +62,7 @@ def create_marka(marka: modeller.UrunMarkaCreate, db: Session = Depends(get_tena
     return db_marka
 
 @router.get("/markalar", response_model=modeller.NitelikListResponse)
-def read_markalar(skip: int = 0, limit: int = 1000, arama: str = Query(None), db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_markalar(skip: int = 0, limit: int = 1000, arama: str = Query(None), db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     query = db.query(modeller.UrunMarka)
     if arama:
         query = query.filter(modeller.UrunMarka.ad.ilike(f"%{arama}%"))
@@ -77,14 +71,14 @@ def read_markalar(skip: int = 0, limit: int = 1000, arama: str = Query(None), db
     return {"items": [modeller.UrunMarkaRead.model_validate(m, from_attributes=True) for m in markalar], "total": total_count}
 
 @router.get("/markalar/{marka_id}", response_model=modeller.UrunMarkaRead)
-def read_marka(marka_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_marka(marka_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     marka = db.query(modeller.UrunMarka).filter(modeller.UrunMarka.id == marka_id).first()
     if not marka:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marka bulunamadı")
     return marka
 
 @router.put("/markalar/{marka_id}", response_model=modeller.UrunMarkaRead)
-def update_marka(marka_id: int, marka: modeller.UrunMarkaUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_marka(marka_id: int, marka: modeller.UrunMarkaUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 13: IZOLASYON FILTRESI KALDIRILDI!
     db_marka = db.query(modeller.UrunMarka).filter(modeller.UrunMarka.id == marka_id).first()
     if not db_marka:
@@ -96,7 +90,7 @@ def update_marka(marka_id: int, marka: modeller.UrunMarkaUpdate, db: Session = D
     return db_marka
 
 @router.delete("/markalar/{marka_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_marka(marka_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_marka(marka_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 14: IZOLASYON FILTRESI KALDIRILDI!
     db_marka = db.query(modeller.UrunMarka).filter(modeller.UrunMarka.id == marka_id).first()
     if not db_marka:
@@ -110,7 +104,7 @@ def delete_marka(marka_id: int, db: Session = Depends(get_tenant_db), current_us
 
 # Ürün Grubu endpointleri
 @router.post("/urun_gruplari/", response_model=modeller.UrunGrubuRead)
-def create_urun_grubu(urun_grubu: modeller.UrunGrubuCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_urun_grubu(urun_grubu: modeller.UrunGrubuCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 16: modeller.UrunGrubu kullanıldı ve kullanici_id=1 atandı.
     db_urun_grubu = modeller.UrunGrubu(**urun_grubu.model_dump(), kullanici_id=1)
     db.add(db_urun_grubu)
@@ -123,7 +117,7 @@ def read_urun_gruplari(
     skip: int = 0,
     limit: int = 1000,
     arama: str = Query(None),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user=Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 17: IZOLASYON FILTRESI KALDIRILDI!
@@ -135,7 +129,7 @@ def read_urun_gruplari(
     return {"items": [modeller.UrunGrubuRead.model_validate(ug, from_attributes=True) for ug in urun_gruplari], "total": total_count}
 
 @router.get("/urun_gruplari/{urun_grubu_id}", response_model=modeller.UrunGrubuRead)
-def read_urun_grubu(urun_grubu_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_urun_grubu(urun_grubu_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 18: IZOLASYON FILTRESI KALDIRILDI!
     urun_grubu = db.query(modeller.UrunGrubu).filter(modeller.UrunGrubu.id == urun_grubu_id).first()
     if not urun_grubu:
@@ -143,7 +137,7 @@ def read_urun_grubu(urun_grubu_id: int, db: Session = Depends(get_tenant_db), cu
     return urun_grubu
 
 @router.put("/urun_gruplari/{urun_grubu_id}", response_model=modeller.UrunGrubuRead)
-def update_urun_grubu(urun_grubu_id: int, urun_grubu: modeller.UrunGrubuUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_urun_grubu(urun_grubu_id: int, urun_grubu: modeller.UrunGrubuUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 19: IZOLASYON FILTRESI KALDIRILDI!
     db_urun_grubu = db.query(modeller.UrunGrubu).filter(modeller.UrunGrubu.id == urun_grubu_id).first()
     if not db_urun_grubu:
@@ -155,7 +149,7 @@ def update_urun_grubu(urun_grubu_id: int, urun_grubu: modeller.UrunGrubuUpdate, 
     return db_urun_grubu
 
 @router.delete("/urun_gruplari/{urun_grubu_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_urun_grubu(urun_grubu_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_urun_grubu(urun_grubu_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 20: IZOLASYON FILTRESI KALDIRILDI!
     db_urun_grubu = db.query(modeller.UrunGrubu).filter(modeller.UrunGrubu.id == urun_grubu_id).first()
     if not db_urun_grubu:
@@ -169,7 +163,7 @@ def delete_urun_grubu(urun_grubu_id: int, db: Session = Depends(get_tenant_db), 
 
 # Birim endpointleri
 @router.post("/urun_birimleri/", response_model=modeller.UrunBirimiRead)
-def create_urun_birimi(urun_birimi: modeller.UrunBirimiCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_urun_birimi(urun_birimi: modeller.UrunBirimiCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 22: modeller.UrunBirimi kullanıldı ve kullanici_id=1 atandı.
     db_urun_birimi = modeller.UrunBirimi(**urun_birimi.model_dump(), kullanici_id=1)
     db.add(db_urun_birimi)
@@ -182,7 +176,7 @@ def read_urun_birimleri(
     skip: int = 0,
     limit: int = 1000,
     arama: str = Query(None),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user=Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 23: IZOLASYON FILTRESI KALDIRILDI!
@@ -194,7 +188,7 @@ def read_urun_birimleri(
     return {"items": [modeller.UrunBirimiRead.model_validate(ub, from_attributes=True) for ub in urun_birimleri], "total": total_count}
 
 @router.get("/urun_birimleri/{urun_birimi_id}", response_model=modeller.UrunBirimiRead)
-def read_urun_birimi(urun_birimi_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_urun_birimi(urun_birimi_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 24: IZOLASYON FILTRESI KALDIRILDI!
     urun_birimi = db.query(modeller.UrunBirimi).filter(modeller.UrunBirimi.id == urun_birimi_id).first()
     if not urun_birimi:
@@ -202,7 +196,7 @@ def read_urun_birimi(urun_birimi_id: int, db: Session = Depends(get_tenant_db), 
     return urun_birimi
 
 @router.put("/urun_birimleri/{urun_birimi_id}", response_model=modeller.UrunBirimiRead)
-def update_urun_birimi(urun_birimi_id: int, urun_birimi: modeller.UrunBirimiUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_urun_birimi(urun_birimi_id: int, urun_birimi: modeller.UrunBirimiUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 25: IZOLASYON FILTRESI KALDIRILDI!
     db_urun_birimi = db.query(modeller.UrunBirimi).filter(modeller.UrunBirimi.id == urun_birimi_id).first()
     if not db_urun_birimi:
@@ -214,7 +208,7 @@ def update_urun_birimi(urun_birimi_id: int, urun_birimi: modeller.UrunBirimiUpda
     return db_urun_birimi
 
 @router.delete("/urun_birimleri/{urun_birimi_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_urun_birimi(urun_birimi_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_urun_birimi(urun_birimi_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 26: IZOLASYON FILTRESI KALDIRILDI!
     db_urun_birimi = db.query(modeller.UrunBirimi).filter(modeller.UrunBirimi.id == urun_birimi_id).first()
     if not db_urun_birimi:
@@ -228,7 +222,7 @@ def delete_urun_birimi(urun_birimi_id: int, db: Session = Depends(get_tenant_db)
 
 # Ülke endpointleri
 @router.post("/ulkeler/", response_model=modeller.UlkeRead)
-def create_ulke(ulke: modeller.UlkeCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_ulke(ulke: modeller.UlkeCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 28: modeller.Ulke kullanıldı ve kullanici_id=1 atandı.
     db_ulke = modeller.Ulke(**ulke.model_dump(), kullanici_id=1)
     db.add(db_ulke)
@@ -241,7 +235,7 @@ def read_ulkeler(
     skip: int = 0,
     limit: int = 1000,
     arama: str = Query(None),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user=Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 29: IZOLASYON FILTRESI KALDIRILDI!
@@ -253,7 +247,7 @@ def read_ulkeler(
     return {"items": [modeller.UlkeRead.model_validate(u, from_attributes=True) for u in ulkeler], "total": total_count}
 
 @router.get("/ulkeler/{ulke_id}", response_model=modeller.UlkeRead)
-def read_ulke(ulke_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_ulke(ulke_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 30: IZOLASYON FILTRESI KALDIRILDI!
     ulke = db.query(modeller.Ulke).filter(modeller.Ulke.id == ulke_id).first()
     if not ulke:
@@ -261,7 +255,7 @@ def read_ulke(ulke_id: int, db: Session = Depends(get_tenant_db), current_user=D
     return ulke
 
 @router.put("/ulkeler/{ulke_id}", response_model=modeller.UlkeRead)
-def update_ulke(ulke_id: int, ulke: modeller.UlkeUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_ulke(ulke_id: int, ulke: modeller.UlkeUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 31: IZOLASYON FILTRESI KALDIRILDI!
     db_ulke = db.query(modeller.Ulke).filter(modeller.Ulke.id == ulke_id).first()
     if not db_ulke:
@@ -273,7 +267,7 @@ def update_ulke(ulke_id: int, ulke: modeller.UlkeUpdate, db: Session = Depends(g
     return db_ulke
 
 @router.delete("/ulkeler/{ulke_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_ulke(ulke_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_ulke(ulke_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 32: IZOLASYON FILTRESI KALDIRILDI!
     db_ulke = db.query(modeller.Ulke).filter(modeller.Ulke.id == ulke_id).first()
     if not db_ulke:
@@ -287,7 +281,7 @@ def delete_ulke(ulke_id: int, db: Session = Depends(get_tenant_db), current_user
 
 # Gelir Sınıflandırma endpointleri
 @router.post("/gelir_siniflandirmalari/", response_model=modeller.GelirSiniflandirmaRead)
-def create_gelir_siniflandirma(siniflandirma: modeller.GelirSiniflandirmaCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_gelir_siniflandirma(siniflandirma: modeller.GelirSiniflandirmaCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 34: modeller.GelirSiniflandirma kullanıldı ve kullanici_id=1 atandı.
     db_siniflandirma = modeller.GelirSiniflandirma(**siniflandirma.model_dump(), kullanici_id=1)
     db.add(db_siniflandirma)
@@ -300,7 +294,7 @@ def read_gelir_siniflandirmalari(
     skip: int = 0,
     limit: int = 100,
     id: Optional[int] = None,
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user=Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 35: IZOLASYON FILTRESI KALDIRILDI!
@@ -312,7 +306,7 @@ def read_gelir_siniflandirmalari(
     return {"items": [modeller.GelirSiniflandirmaRead.model_validate(s, from_attributes=True) for s in siniflandirmalar], "total": total_count}
 
 @router.get("/gelir_siniflandirmalari/{siniflandirma_id}", response_model=modeller.GelirSiniflandirmaRead)
-def read_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 36: IZOLASYON FILTRESI KALDIRILDI!
     siniflandirma = db.query(modeller.GelirSiniflandirma).filter(modeller.GelirSiniflandirma.id == siniflandirma_id).first()
     if not siniflandirma:
@@ -320,7 +314,7 @@ def read_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_te
     return siniflandirma
 
 @router.put("/gelir_siniflandirmalari/{siniflandirma_id}", response_model=modeller.GelirSiniflandirmaRead)
-def update_gelir_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.GelirSiniflandirmaUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_gelir_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.GelirSiniflandirmaUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 37: IZOLASYON FILTRESI KALDIRILDI!
     db_siniflandirma = db.query(modeller.GelirSiniflandirma).filter(modeller.GelirSiniflandirma.id == siniflandirma_id).first()
     if not db_siniflandirma:
@@ -332,7 +326,7 @@ def update_gelir_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.Ge
     return db_siniflandirma
 
 @router.delete("/gelir_siniflandirmalari/{siniflandirma_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 38: IZOLASYON FILTRESI KALDIRILDI!
     db_siniflandirma = db.query(modeller.GelirSiniflandirma).filter(modeller.GelirSiniflandirma.id == siniflandirma_id).first()
     if not db_siniflandirma:
@@ -346,7 +340,7 @@ def delete_gelir_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_
 
 # Gider Sınıflandırma endpointleri
 @router.post("/gider_siniflandirmalari/", response_model=modeller.GiderSiniflandirmaRead)
-def create_gider_siniflandirma(siniflandirma: modeller.GiderSiniflandirmaCreate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def create_gider_siniflandirma(siniflandirma: modeller.GiderSiniflandirmaCreate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 40: modeller.GiderSiniflandirma kullanıldı ve kullanici_id=1 atandı.
     db_siniflandirma = modeller.GiderSiniflandirma(**siniflandirma.model_dump(), kullanici_id=1)
     db.add(db_siniflandirma)
@@ -359,7 +353,7 @@ def read_gider_siniflandirmalari(
     skip: int = 0,
     limit: int = 100,
     id: Optional[int] = None,
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user=Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 41: IZOLASYON FILTRESI KALDIRILDI!
@@ -371,7 +365,7 @@ def read_gider_siniflandirmalari(
     return {"items": [modeller.GiderSiniflandirmaRead.model_validate(s, from_attributes=True) for s in siniflandirmalar], "total": total_count}
 
 @router.get("/gider_siniflandirmalari/{siniflandirma_id}", response_model=modeller.GiderSiniflandirmaRead)
-def read_gider_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def read_gider_siniflandirma(siniflandirma_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 42: IZOLASYON FILTRESI KALDIRILDI!
     siniflandirma = db.query(modeller.GiderSiniflandirma).filter(modeller.GiderSiniflandirma.id == siniflandirma_id).first()
     if not siniflandirma:
@@ -379,7 +373,7 @@ def read_gider_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_te
     return siniflandirma
 
 @router.put("/gider_siniflandirmalari/{siniflandirma_id}", response_model=modeller.GiderSiniflandirmaRead)
-def update_gider_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.GiderSiniflandirmaUpdate, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def update_gider_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.GiderSiniflandirmaUpdate, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 43: IZOLASYON FILTRESI KALDIRILDI!
     db_siniflandirma = db.query(modeller.GiderSiniflandirma).filter(modeller.GiderSiniflandirma.id == siniflandirma_id).first()
     if not db_siniflandirma:
@@ -391,7 +385,7 @@ def update_gider_siniflandirma(siniflandirma_id: int, siniflandirma: modeller.Gi
     return db_siniflandirma
 
 @router.delete("/gider_siniflandirmalari/{siniflandirma_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_gider_siniflandirma(siniflandirma_id: int, db: Session = Depends(get_tenant_db), current_user=Depends(guvenlik.get_current_user)):
+def delete_gider_siniflandirma(siniflandirma_id: int, db: Session = Depends(veritabani.get_db), current_user=Depends(guvenlik.get_current_user)):
     # KRİTİK DÜZELTME 44: IZOLASYON FILTRESI KALDIRILDI!
     db_siniflandirma = db.query(modeller.GiderSiniflandirma).filter(modeller.GiderSiniflandirma.id == siniflandirma_id).first()
     if not db_siniflandirma:

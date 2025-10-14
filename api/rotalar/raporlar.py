@@ -1,4 +1,4 @@
-# api/rotalar/raporlar.py dosyasının TAMAMI 
+# api/rotalar/raporlar.py dosyasının dosyasının tam içeriği
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, extract, case, String
@@ -16,19 +16,11 @@ router = APIRouter(prefix="/raporlar", tags=["Raporlar"])
 REPORTS_DIR = "server_reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
-    """Token'dan tenant adını alır ve ilgili veritabanı oturumunu döndürür."""
-    tenant_name = payload.get("tenant_db")
-    if not tenant_name:
-        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
-    # veritabani.py'deki basit get_db fonksiyonunu çağırır
-    yield from veritabani.get_db(tenant_name)
-
 @router.get("/dashboard_ozet", response_model=modeller.PanoOzetiYanit)
 def get_dashboard_ozet_endpoint(
     baslangic_tarihi: date = Query(None, description="Başlangıç tarihi (YYYY-MM-DD)"),
     bitis_tarihi: date = Query(None, description="Bitiş tarihi (YYYY-MM-DD)"),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 4: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -129,7 +121,7 @@ def get_satislar_detayli_rapor_endpoint(
     baslangic_tarihi: date = Query(..., description="YYYY-MM-DD formatında başlangıç tarihi"),
     bitis_tarihi: date = Query(..., description="YYYY-MM-DD formatında bitiş tarihi"),
     cari_id: int = Query(None),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 5: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -152,7 +144,7 @@ def generate_tarihsel_satis_raporu_excel_endpoint(
     baslangic_tarihi: date = Query(..., description="Başlangıç tarihi (YYYY-MM-DD)"),
     bitis_tarihi: date = Query(..., description="YYYY-MM-DD formatında bitiş tarihi"),
     cari_id: Optional[int] = Query(None, description="Opsiyonel Cari ID"),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 6: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -232,7 +224,7 @@ def generate_tarihsel_satis_raporu_excel_endpoint(
 def get_kar_zarar_verileri_endpoint(
     baslangic_tarihi: date = Query(..., description="YYYY-MM-DD formatında başlangıç tarihi"),
     bitis_tarihi: date = Query(..., description="YYYY-MM-DD formatında bitiş tarihi"),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -286,7 +278,7 @@ def get_kar_zarar_verileri_endpoint(
 def get_nakit_akisi_raporu_endpoint(
     baslangic_tarihi: date = Query(..., description="YYYY-MM-DD formatında başlangıç tarihi"),
     bitis_tarihi: date = Query(..., description="YYYY-MM-DD formatında bitiş tarihi"),
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 9: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -369,7 +361,7 @@ def get_nakit_akisi_raporu_endpoint(
 
 @router.get("/cari_yaslandirma_raporu", response_model=modeller.CariYaslandirmaResponse)
 def get_cari_yaslandirma_verileri_endpoint(
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 10: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -413,7 +405,7 @@ def get_cari_hesap_ekstresi_endpoint(
     cari_turu: modeller.CariTipiEnum = Query(..., description="Cari Türü (MUSTERI veya TEDARIKCI)"), # DÜZELTME
     baslangic_tarihi: date = Query(..., description="Başlangıç tarihi (YYYY-MM-DD)"),
     bitis_tarihi: date = Query(..., description="Bitiş tarihi (YYYY-MM-DD)"),
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 11: IZOLASYON FILTRELERI KALDIRILDI ve modeller.X kullanıldı.
@@ -474,7 +466,7 @@ def get_cari_hesap_ekstresi_endpoint(
 
 @router.get("/stok_deger_raporu", response_model=modeller.StokDegerResponse)
 def get_stok_envanter_ozet_endpoint(
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 12: IZOLASYON FILTRESI KALDIRILDI ve modeller.X kullanıldı.
@@ -487,7 +479,7 @@ def get_stok_envanter_ozet_endpoint(
     }
 
 @router.get("/download_report/{filename}", status_code=status.HTTP_200_OK)
-async def download_report_excel_endpoint(filename: str, db: Session = Depends(get_tenant_db)): # Tenant DB kullanılır
+async def download_report_excel_endpoint(filename: str, db: Session = Depends(veritabani.get_db)): # Tenant DB kullanılır
     filepath = os.path.join(REPORTS_DIR, filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rapor dosyası bulunamadı.")
@@ -497,7 +489,7 @@ async def download_report_excel_endpoint(filename: str, db: Session = Depends(ge
 @router.get("/gelir_gider_aylik_ozet", response_model=modeller.GelirGiderAylikOzetResponse)
 def get_gelir_gider_aylik_ozet_endpoint(
     yil: int = Query(..., ge=2000, le=date.today().year),
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 13: IZOLASYON FILTRESI KALDIRILDI ve modeller.X kullanıldı.
@@ -536,7 +528,7 @@ def get_gelir_gider_aylik_ozet_endpoint(
 def get_urun_faturalari_endpoint(
     urun_id: int,
     fatura_turu: str = Query(None),
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 14: IZOLASYON FILTRESI KALDIRILDI ve modeller.X kullanıldı.
@@ -560,7 +552,7 @@ def get_fatura_kalem_gecmisi_endpoint(
     cari_id: int,
     urun_id: int,
     fatura_tipi: modeller.FaturaTuruEnum, # DÜZELTME
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 15: IZOLASYON FILTRESI KALDIRILDI ve modeller.X kullanıldı.

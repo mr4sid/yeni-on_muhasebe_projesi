@@ -6,6 +6,8 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.engine.base import Engine
 import logging
 from typing import Dict, Optional
+from fastapi import HTTPException, status, Depends
+from . import guvenlik, modeller
 
 # Loglama ayarları
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,26 +16,32 @@ logger = logging.getLogger(__name__)
 # .env dosyasındaki ortam değişkenlerini yükle
 load_dotenv()
 
-# --- BAĞLANTI SABİTLERİ (MASTER BAĞLANTISI İÇİN) ---
+# --- BAĞLANTI SABİTLERİ ---
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
-MASTER_DB_NAME = os.getenv("DB_NAME") # MASTER veritabanı adı
+MASTER_DB_NAME = os.getenv("DB_NAME")
 ROOT_DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/"
 DATABASE_URL = f"{ROOT_DB_URL}{MASTER_DB_NAME}"
 
 if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, MASTER_DB_NAME]):
-    logger.error("Veritabanı bağlantı bilgileri .env dosyasından eksik veya hatalı. Lütfen .env dosyasını kontrol edin.")
+    logger.error("Veritabanı bağlantı bilgileri .env dosyasından eksik veya hatalı.")
     raise ValueError("Veritabanı bağlantı bilgileri eksik.")
 
-# SQLAlchemy motorları ve Session maker'lar için sözlükler
-tenant_engines: Dict[str, Engine] = {}
-tenant_session_locals: Dict[str, sessionmaker] = {}
+# --- MERKEZİ BAŞLATMA (INITIALIZATION) ---
+# KRİTİK DÜZELTME: motor (engine) ve oturum yöneticisi (SessionLocal)
+# burada, modül yüklendiğinde bir kez oluşturulur.
+try:
+    master_engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    MasterSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=master_engine)
+    logger.info(f"MASTER DB motoru başlatıldı: {MASTER_DB_NAME}")
+except Exception as e:
+    logger.error(f"MASTER DB motoru başlatılırken hata oluştu: {e}")
+    master_engine = None
+    MasterSessionLocal = None # Hata durumunda None olarak kalsın
 
-# MASTER DB için gerekli global instance'lar
-master_engine: Optional[Engine] = None
-MasterSessionLocal: Optional[sessionmaker] = None
+tenant_engines: Dict[str, Engine] = {}
 
 def get_master_engine() -> Engine:
     """MASTER veritabanı motorunu döndürür (Kullanıcı kayıtları için)."""
@@ -45,17 +53,10 @@ def get_master_engine() -> Engine:
     return master_engine
 
 def get_master_db():
-    """MASTER DB oturumu almak için bağımlılık fonksiyonu."""
-    global MasterSessionLocal
-    if MasterSessionLocal is None:
-        MasterSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_master_engine())
-    
+    """Master veritabanı için bir oturum (session) sağlar."""
     db = MasterSessionLocal()
     try:
         yield db
-    except Exception as e:
-        logger.critical(f"MASTER DB bağlantısı kurulamadı! Hata: {e}")
-        raise
     finally:
         db.close()
 
@@ -69,24 +70,20 @@ def get_tenant_engine(tenant_db_name: str) -> Engine:
         logger.info(f"Yeni Tenant DB motoru başlatıldı: {tenant_db_name}")
     return tenant_engines[tenant_db_name]
 
-def get_db(tenant_db_name: str):
-    """
-    Tenant veritabanı oturumu almak için bağımlılık fonksiyonu.
-    """
-    if tenant_db_name not in tenant_session_locals:
-        engine = get_tenant_engine(tenant_db_name)
-        TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        tenant_session_locals[tenant_db_name] = TenantSessionLocal
-    
-    db = tenant_session_locals[tenant_db_name]()
+def get_db(current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)):
+    """Kullanıcı token'ından alınan bilgiye göre tenant veritabanı oturumu sağlar."""
+    tenant_db_name = current_user.tenant_db_name
+    if not tenant_db_name:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Kullanıcıya atanmış bir firma veritabanı bulunamadı."
+        )
+
+    engine = get_tenant_engine(tenant_db_name)
+    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = TenantSessionLocal()
     try:
         yield db
-    except Exception as e:
-        logger.critical(f"Tenant DB ({tenant_db_name}) bağlantısı kurulamadı! Hata: {e}")
-        if tenant_db_name in tenant_engines:
-            tenant_engines[tenant_db_name].dispose()
-            del tenant_engines[tenant_db_name]
-        raise
     finally:
         db.close()
 

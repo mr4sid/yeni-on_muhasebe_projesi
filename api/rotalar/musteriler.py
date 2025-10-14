@@ -9,18 +9,11 @@ from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(prefix="/musteriler", tags=["Müşteriler"])
 
-def get_tenant_db(payload: dict = Depends(guvenlik.get_token_payload)):
-    """Token'dan tenant adını alır ve ilgili veritabanı oturumunu döndürür."""
-    tenant_name = payload.get("tenant_db")
-    if not tenant_name:
-        raise HTTPException(status_code=400, detail="Token tenant bilgisi içermiyor.")
-    yield from veritabani.get_db(tenant_name)
-
 @router.post("/", response_model=modeller.MusteriRead)
 def create_musteri(
     musteri: modeller.MusteriCreate,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(get_tenant_db)
+    db: Session = Depends(veritabani.get_db)
 ):
     try:
         db_musteri = modeller.Musteri(**musteri.model_dump(exclude_unset=True), kullanici_id=1)
@@ -52,7 +45,7 @@ def read_musteriler(
     limit: int = 25,
     arama: Optional[str] = None,
     aktif_durum: Optional[bool] = None,
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 4: IZOLASYON FILTRESI KALDIRILDI!
@@ -106,7 +99,7 @@ def read_musteriler(
 @router.get("/{musteri_id}", response_model=modeller.MusteriRead)
 def read_musteri(
     musteri_id: int,
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
@@ -137,7 +130,7 @@ def read_musteri(
 def update_musteri(
     musteri_id: int,
     musteri: modeller.MusteriUpdate,
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
@@ -177,7 +170,7 @@ def update_musteri(
 @router.delete("/{musteri_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_musteri(
     musteri_id: int,
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
@@ -202,7 +195,7 @@ def delete_musteri(
 
 @router.get("/kod_sirasi/next", response_model=modeller.NextCodeResponse)
 def get_next_musteri_kod(
-    db: Session = Depends(get_tenant_db), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!

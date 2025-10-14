@@ -1,4 +1,4 @@
-# api/rotalar/dogrulama.py dosyasının TAMAMI (Master Sorgu Fix)
+# api/rotalar/dogrulama.py dosyasının Dosyasının tam ve güncel içeriğidir.
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload 
 from datetime import timedelta
@@ -8,7 +8,7 @@ import logging
 from .. import modeller 
 from ..veritabani import get_master_db, get_tenant_engine, get_master_engine
 from ..guvenlik import create_access_token, verify_password, get_password_hash
-from ..config import ACCESS_TOKEN_EXPIRE_MINUTES
+from ..config import settings
 from sqlalchemy import text 
 from sqlalchemy.orm import sessionmaker
 
@@ -122,7 +122,8 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
                 detail=f"Giriş sırasında firma veritabanı oluşturulamadı."
             )
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # KRİTİK DÜZELTME: Ayar artık merkezi 'settings' nesnesinden okunuyor.
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email, "tenant_db": tenant_db_name}, 
         expires_delta=access_token_expires

@@ -7,10 +7,16 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session, joinedload
-
 from . import modeller
-from .veritabani import get_master_db # Bu import artık güvende
-from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from .database_core import MasterSessionLocal
+from .config import settings
+
+def get_master_db():
+    db = MasterSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Şifre karma oluşturma (hashing) bağlamı
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -33,15 +39,16 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """
     Verilen verilerle bir JWT erişim jetonu oluşturur.
-    'data' içinde 'sub' (email) ve 'tenant_db' bulunmalıdır.
     """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        # Ayarı merkezi 'settings' nesnesinden al
+        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    # Ayarları merkezi 'settings' nesnesinden al
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 def get_token_payload(token: str = Depends(oauth2_scheme)) -> dict:
@@ -52,7 +59,7 @@ def get_token_payload(token: str = Depends(oauth2_scheme)) -> dict:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         tenant_db_name: str = payload.get("tenant_db")
         if email is None or tenant_db_name is None:
@@ -62,35 +69,34 @@ def get_token_payload(token: str = Depends(oauth2_scheme)) -> dict:
         raise credentials_exception
 
 def get_current_user(
-    payload: dict = Depends(get_token_payload),
-    master_db: Session = Depends(get_master_db)
-) -> modeller.KullaniciRead:
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_master_db)
+):
     """
-    Token payload'ını ve master_db'yi kullanarak geçerli kullanıcıyı doğrular ve
-    Pydantic modeli olarak döndürür.
+    Token'ı doğrular ve master veritabanından kullanıcıyı getirir.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Kullanıcı bulunamadı veya geçersiz.",
+        detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
-    email: str = payload.get("sub")
-    tenant_db_name: str = payload.get("tenant_db")
+    try:
+        # Ayarı merkezi 'settings' nesnesinden al
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
 
-    user = master_db.query(modeller.Kullanici).options(
-        joinedload(modeller.Kullanici.firma)
-    ).filter(
-        modeller.Kullanici.email == email
-    ).first()
-    
-    if user is None:
+        user = db.query(modeller.Kullanici).filter(modeller.Kullanici.email == email).first()
+        if user is None:
+            raise credentials_exception
+
+        firma = user.firma
+        user_read = modeller.KullaniciRead.from_orm(user)
+        # İlişkili alanları manuel olarak ata
+        user_read.firma_adi = firma.firma_adi if firma else None
+        user_read.tenant_db_name = firma.tenant_db_name if firma else None
+
+        return user_read
+    except JWTError:
         raise credentials_exception
-        
-    user_read_data = modeller.KullaniciRead.model_validate(user, from_attributes=True)
-    
-    user_read_data.tenant_db_name = tenant_db_name
-    if user.firma:
-        user_read_data.firma_adi = user.firma.firma_adi
-    
-    return user_read_data

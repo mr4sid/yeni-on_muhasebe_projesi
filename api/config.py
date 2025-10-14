@@ -1,28 +1,23 @@
+# Lütfen api/config.py dosyasının TÜM içeriğini bununla değiştirin.
 import os
 from dotenv import load_dotenv
-from datetime import timedelta
 
-# Projenin kök dizininde .env dosyasını yükleyin
+# .env dosyasını projenin kök dizininden yükle
 load_dotenv()
 
-# JWT için gizli anahtar
-# Ortam değişkeninden alın, yoksa varsayılan bir değer kullanın.
-SECRET_KEY = os.getenv("SECRET_KEY", "gizli-anahtar-cok-gizli-kimse-bilmesin")
+# Ayarları .env dosyasından oku ve merkezi bir nesne olarak sun
+class Settings:
+    DB_USER: str = os.getenv("DB_USER")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD")
+    DB_HOST: str = os.getenv("DB_HOST")
+    DB_PORT: str = os.getenv("DB_PORT")
+    DB_NAME: str = os.getenv("DB_NAME")
+    SECRET_KEY: str = os.getenv("SECRET_KEY")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    # Veritabanı URL'sini otomatik olarak oluştur
+    DATABASE_URL: str = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# Token için kullanılacak algoritma
-ALGORITHM = "HS256"
-
-# Token'ın geçerlilik süresi
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-# Veritabanı bağlantı URL'sini ortam değişkenlerinden oluşturun
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-
-SQLALCHEMY_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
-# Alembic ayarları için veritabanı URL'si
-ALEMBIC_DATABASE_URL = SQLALCHEMY_DATABASE_URL
+# Ayarları diğer dosyaların kullanabilmesi için tek bir nesne oluştur
+settings = Settings()
