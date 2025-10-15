@@ -2254,194 +2254,73 @@ class SiparisDetayPenceresi(QDialog):
                 self.clear_layout(item.layout())
 
 class YoneticiAyarlariPenceresi(QDialog):
-    def __init__(self, parent_app, db_manager):
-        super().__init__(parent_app)
-        self.app = parent_app
-        self.db = db_manager
-        self.setWindowTitle("Yönetici Ayarları ve Veri İşlemleri")
-        self.setMinimumSize(600, 500)
-        self.setModal(True)
-        
-        self.utility_map = {
-            "Geçmiş Hatalı Kayıtları Temizle": self.db.gecmis_hatali_kayitlari_temizle,
-            "Stok Envanterini Yeniden Hesapla": self.db.stok_envanterini_yeniden_hesapla,
-            "Stok Verilerini Temizle": self.db.clear_stok_data,
-            "Müşteri Verilerini Temizle": self.db.clear_musteri_data,
-            "Tedarikçi Verilerini Temizle": self.db.clear_tedarikci_data,
-            "Kasa/Banka Verilerini Temizle": self.db.clear_kasa_banka_data,
-            "Tüm İşlem Verilerini Temizle": self.db.clear_all_transaction_data,
-            "Tüm Verileri Temizle (Kullanıcılar Hariç)": self.db.clear_all_data,
-        }
-
-        main_layout = QVBoxLayout(self)
-        title_label = QLabel("Veri Sıfırlama ve Bakım")
-        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
-
-        main_frame = QWidget(self)
-        main_frame_layout = QVBoxLayout(main_frame)
-        main_layout.addWidget(main_frame)
-        
-        buttons_info = [
-            ("Geçmiş Hatalı Kayıtları Temizle", "Var olmayan faturalara ait 'hayalet' cari ve gelir/gider hareketlerini siler. (Tek seferlik çalıştırın)"),
-            ("Stok Envanterini Yeniden Hesapla", "Tüm stokları faturalara göre sıfırdan hesaplar. Geçmiş hatalı silme işlemlerini düzeltir."),
-            ("Stok Verilerini Temizle", "Bu işlem tüm ürünleri ve ilişkili kalemleri siler."),
-            ("Müşteri Verilerini Temizle", "Bu işlem perakende müşteri hariç tüm müşterileri ve ilişkili hareketlerini siler."),
-            ("Tedarikçi Verilerini Temizle", "Bu işlem tüm tedarikçileri ve ilişkili hareketlerini siler."),
-            ("Kasa/Banka Verilerini Temizle", "Bu işlem tüm kasa/banka hesaplarını temizler ve ilişkili referansları kaldırır."),
-            ("Tüm İşlem Verilerini Temizle", "Faturalar, gelir/gider, cari hareketler, siparişler ve teklifler gibi tüm operasyonel verileri siler. Ana kayıtlar korunur."),
-            ("Tüm Verileri Temizle (Kullanıcılar Hariç)", "Kullanıcılar ve şirket ayarları hariç tüm veritabanını temizler. Program yeniden başlatılacaktır.")
-        ]
-
-        for text, desc in buttons_info:
-            btn_frame = QFrame()
-            btn_frame_layout = QHBoxLayout(btn_frame)
-            
-            btn = QPushButton(text)
-            # DÜZELTME: Sinyal bağlantısı butonun metnini ve herhangi bir argümanı alacak şekilde güncellendi.
-            btn.clicked.connect(lambda t=text, *args: self._run_utility(t))
-            btn_frame_layout.addWidget(btn)
-            
-            desc_label = QLabel(desc)
-            desc_label.setWordWrap(True)
-            desc_label.setStyleSheet("font-size: 8pt;")
-            btn_frame_layout.addWidget(desc_label, 1)
-            
-            main_frame_layout.addWidget(btn_frame)
-        
-        btn_kapat = QPushButton("Kapat")
-        btn_kapat.clicked.connect(self.close)
-        main_layout.addWidget(btn_kapat, alignment=Qt.AlignCenter)
-
-    def _run_utility(self, button_text):
-        """
-        Onay alıp yardımcı fonksiyonu çalıştıran ana metot.
-        """
-        confirm_message = f"'{button_text}' işlemini gerçekleştirmek istediğinizden emin misiniz?\n\nBU İŞLEM GERİ ALINAMAZ!"
-        if "Tüm Verileri Temizle" in button_text:
-             confirm_message += "\n\nBu işlemden sonra program yeniden başlatılacaktır."
-
-        reply = QMessageBox.question(self, "Onay Gerekli", confirm_message, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            try:
-                utility_function = self.utility_map.get(button_text)
-                if utility_function:
-                    # Düzeltme: Fonksiyon çağrısına kullanici_id parametresini ekle
-                    success, message = utility_function(kullanici_id=self.app.current_user[0])
-
-                    if success:
-                        QMessageBox.information(self, "Başarılı", message)
-                        self.app.set_status_message(message)
-                        
-                        if "Tüm Verileri Temizle" in button_text:
-                            self.close()
-                            self.app.close()
-                    else:
-                        QMessageBox.critical(self, "Hata", message)
-                        self.app.set_status_message(f"'{button_text}' işlemi sırasında hata oluştu: {message}")
-                else:
-                    QMessageBox.critical(self, "Hata", f"'{button_text}' işlemi için eşleşen bir fonksiyon bulunamadı.")
-            except Exception as e:
-                QMessageBox.critical(self, "Kritik Hata", f"İşlem sırasında beklenmedik bir hata oluştu: {e}")
-                logging.error(f"'{button_text}' yardımcı programı çalıştırılırken hata: {traceback.format_exc()}")
-        else:
-            self.app.set_status_message(f"'{button_text}' işlemi iptal edildi.")
-
-class SirketBilgileriPenceresi(QDialog):
-    def __init__(self, parent, db_manager):
+    def __init__(self, parent=None, db_manager=None):
         super().__init__(parent)
         self.db = db_manager
-        self.app_parent = parent # Ana App referansı
-        self.setWindowTitle("Şirket Bilgileri")
-        self.setMinimumSize(550, 400)
-        self.setModal(True)
+        self.setWindowTitle("Yönetici Ayarları - Firma Bilgileri")
+        self.setMinimumWidth(500)
 
-        main_layout = QVBoxLayout(self)
-        title_label = QLabel("Şirket Bilgileri Yönetimi")
-        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        self.layout = QGridLayout(self)
+        self.layout.addWidget(QLabel("<b>Firma Bilgileri</b>"), 0, 0, 1, 2)
+
+        self.layout.addWidget(QLabel("Firma Ünvanı:"), 1, 0)
+        self.unvan_entry = QLineEdit()
+        self.layout.addWidget(self.unvan_entry, 1, 1)
         
-        main_frame = QWidget(self)
-        main_frame_layout = QGridLayout(main_frame)
-        main_layout.addWidget(main_frame)
+        # Diğer firma bilgileri için alanlar
+        self.layout.addWidget(QLabel("Vergi Dairesi:"), 2, 0)
+        self.vergi_dairesi_entry = QLineEdit()
+        self.layout.addWidget(self.vergi_dairesi_entry, 2, 1)
+        
+        self.layout.addWidget(QLabel("Vergi No:"), 3, 0)
+        self.vergi_no_entry = QLineEdit()
+        self.layout.addWidget(self.vergi_no_entry, 3, 1)
+        
+        self.layout.addWidget(QLabel("Adres:"), 4, 0)
+        self.adres_entry = QLineEdit()
+        self.layout.addWidget(self.adres_entry, 4, 1)
 
-        self.field_definitions = [
-            ("Şirket Adı:", "sirket_adi", QLineEdit),
-            ("Adres:", "sirket_adresi", QTextEdit),
-            ("Telefon:", "sirket_telefonu", QLineEdit),
-            ("E-mail:", "sirket_email", QLineEdit),
-            ("Vergi Dairesi:", "sirket_vergi_dairesi", QLineEdit),
-            ("Vergi No:", "sirket_vergi_no", QLineEdit),
-            ("Logo Yolu:", "sirket_logo_yolu", QLineEdit)
-        ]
-        self.entries = {}
+        # ... (Gelecekte eklenebilecek diğer alanlar) ...
 
-        for i, (label_text, db_key_name, widget_type) in enumerate(self.field_definitions):
-            main_frame_layout.addWidget(QLabel(label_text), i, 0, alignment=Qt.AlignCenter)
-            
-            if widget_type == QTextEdit:
-                widget = QTextEdit()
-                widget.setFixedHeight(60) # Yükseklik ayarı
-            else: # QLineEdit
-                widget = QLineEdit()
-            
-            self.entries[db_key_name] = widget
-            main_frame_layout.addWidget(widget, i, 1)
-            
-            if db_key_name == "sirket_logo_yolu":
-                logo_button = QPushButton("Gözat...")
-                logo_button.clicked.connect(self.logo_gozat)
-                main_frame_layout.addWidget(logo_button, i, 2)
+        self.kaydet_button = QPushButton("Bilgileri Kaydet")
+        self.kaydet_button.clicked.connect(self.bilgileri_kaydet)
+        self.layout.addWidget(self.kaydet_button, 5, 0, 1, 2)
 
-        main_frame_layout.setColumnStretch(1, 1) # Entry'lerin genişlemesi için
+        self._mevcut_bilgileri_yukle()
 
-        self.yukle_bilgiler()
+    def _mevcut_bilgileri_yukle(self):
+        """Mevcut firma bilgilerini API'den çeker ve form alanlarını doldurur."""
+        try:
+            success, data = self.db.sirket_bilgilerini_getir()
+            if success and data:
+                self.unvan_entry.setText(data.get("unvan", ""))
+                self.vergi_dairesi_entry.setText(data.get("vergi_dairesi", ""))
+                self.vergi_no_entry.setText(data.get("vergi_no", ""))
+                self.adres_entry.setText(data.get("adres", ""))
+            elif not success:
+                QMessageBox.warning(self, "Hata", f"Firma bilgileri yüklenemedi:\n{data}")
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Firma bilgileri yüklenirken bir hata oluştu:\n{e}")
 
-        button_layout = QHBoxLayout()
-        button_layout.addStretch() # Butonları sağa yasla
-        kaydet_button = QPushButton("Kaydet")
-        kaydet_button.clicked.connect(self.kaydet_bilgiler)
-        button_layout.addWidget(kaydet_button)
-        iptal_button = QPushButton("İptal")
-        iptal_button.clicked.connect(self.close)
-        button_layout.addWidget(iptal_button)
-        main_layout.addLayout(button_layout)
-
-    def logo_gozat(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Logo Seçin", "", "Resim Dosyaları (*.png *.jpg *.jpeg);;Tüm Dosyalar (*)")
-        if file_path:
-            self.entries["sirket_logo_yolu"].setText(file_path)
-
-    def yukle_bilgiler(self):
-        mevcut_bilgiler = self.db.sirket_bilgilerini_yukle()
-        for db_key_name, entry_widget in self.entries.items():
-            if isinstance(entry_widget, QTextEdit):
-                entry_widget.setPlainText(mevcut_bilgiler.get(db_key_name, ""))
+    def bilgileri_kaydet(self):
+        """Formdaki bilgileri API'ye göndererek günceller."""
+        guncel_data = {
+            "unvan": self.unvan_entry.text(),
+            "vergi_dairesi": self.vergi_dairesi_entry.text(),
+            "vergi_no": self.vergi_no_entry.text(),
+            "adres": self.adres_entry.text()
+        }
+        
+        try:
+            success, message = self.db.sirket_bilgilerini_guncelle(guncel_data)
+            if success:
+                QMessageBox.information(self, "Başarılı", "Firma bilgileri başarıyla güncellendi.")
+                self.accept()
             else:
-                entry_widget.setText(mevcut_bilgiler.get(db_key_name, ""))
-    
-    def kaydet_bilgiler(self):
-        yeni_bilgiler = {}
-        for db_key_name, entry_widget in self.entries.items():
-            if isinstance(entry_widget, QTextEdit):
-                yeni_bilgiler[db_key_name] = entry_widget.toPlainText().strip()
-            else:
-                yeni_bilgiler[db_key_name] = entry_widget.text().strip()
-
-        print(f"DEBUG: kaydet_bilgiler - yeni_bilgiler sözlüğü: {yeni_bilgiler}")
-        success, message = self.db.sirket_bilgilerini_kaydet(yeni_bilgiler)
-        if success:
-            if hasattr(self.app_parent, 'ana_sayfa') and hasattr(self.app_parent.ana_sayfa, 'guncelle_sirket_adi'):
-                self.app_parent.ana_sayfa.guncelle_sirket_adi()
-            if hasattr(self.app_parent, 'set_status_message'):
-                 self.app_parent.set_status_message(message)
-            QMessageBox.information(self, "Başarılı", message)
-            self.close()
-        else:
-            QMessageBox.critical(self, "Hata", message)
-            
+                QMessageBox.warning(self, "Hata", f"Bilgiler güncellenemedi:\n{message}")
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Bilgiler güncellenirken bir hata oluştu:\n{e}")
+                        
 class StokHareketiPenceresi(QDialog):
     def __init__(self, parent, db_manager, urun_id, urun_adi, mevcut_stok, hareket_yonu, yenile_callback):
         super().__init__(parent)

@@ -1,24 +1,24 @@
-# api/rotalar/yonetici.py DOSYASININ TAM İÇERİĞİ (Database-per-Tenant Uyumlu)
+# api/rotalar/yonetici.py DOSYASININ TAM İÇERİĞİ 
 import os
 import shutil
 import subprocess
 import logging
-from fastapi import APIRouter, HTTPException, Depends, status, Query, UploadFile, File
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional, List
-from datetime import datetime
 from sqlalchemy import text
-from .. import modeller, guvenlik
-# KRİTİK DÜZELTME 1: Tenant ve Master DB fonksiyonları için gerekli olanlar import edildi
-from ..veritabani import get_db as get_tenant_db, reset_db_connection, get_master_engine
+from typing import Optional
 
+from .. import modeller, guvenlik
+from ..veritabani import get_master_db, get_tenant_db, reset_db_connection, get_master_engine, create_tenant_db_and_tables, add_default_user_data
+
+# 1. GÜNCELLEME: Rota adresi "/yonetici" olarak düzeltildi.
 router = APIRouter(
-    prefix="/admin",
+    prefix="/yonetici",
     tags=["Yönetici İşlemleri"]
 )
 
-# KRİTİK DÜZELTME 2: DB Bağlantı Bilgileri ENV'den okunur
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
@@ -35,6 +35,68 @@ class BackupRequest(BaseModel):
 
 class RestoreRequest(BaseModel):
     file_path: str
+
+@router.post("/firma_olustur", status_code=status.HTTP_201_CREATED)
+def firma_olustur(firma_data: modeller.FirmaOlustur, db: Session = Depends(get_master_db)):
+    """
+    Yeni bir firma (tenant), ona ait veritabanı ve yönetici kullanıcısını oluşturur.
+    """
+    db_kullanici = db.query(modeller.Kullanici).filter(modeller.Kullanici.email == firma_data.yonetici_email).first()
+    if db_kullanici:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bu e-posta adresi zaten kayıtlı.")
+
+    db_firma = db.query(modeller.Firma).filter(modeller.Firma.unvan == firma_data.firma_unvani).first()
+    if db_firma:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bu firma ünvanı zaten kayıtlı.")
+
+    db_name_prefix = "".join(e for e in firma_data.firma_unvani.lower() if e.isalnum() or e in " _").replace(" ", "_")
+    tenant_db_name = f"tenant_{db_name_prefix[:50]}"
+
+    try:
+        create_tenant_db_and_tables(tenant_db_name)
+
+        yeni_firma = modeller.Firma(unvan=firma_data.firma_unvani, db_adi=tenant_db_name)
+        db.add(yeni_firma)
+        db.flush()
+
+        ad_soyad_split = firma_data.yonetici_ad_soyad.split(" ", 1)
+        ad = ad_soyad_split[0]
+        soyad = ad_soyad_split[1] if len(ad_soyad_split) > 1 else ""
+
+        hashed_sifre = guvenlik.get_password_hash(firma_data.yonetici_sifre)
+        yeni_kullanici = modeller.Kullanici(
+            ad=ad,
+            soyad=soyad,
+            email=firma_data.yonetici_email,
+            sifre_hash=hashed_sifre,
+            telefon=firma_data.yonetici_telefon,
+            rol="YONETICI",
+            firma_id=yeni_firma.id
+        )
+        db.add(yeni_kullanici)
+        db.commit()
+        db.refresh(yeni_firma)
+        db.refresh(yeni_kullanici)
+
+        with next(get_tenant_db(tenant_db_name)) as tenant_session:
+            # --- GÜNCELLEME BURADA: Artık doğru kullanıcının ID'si gönderiliyor ---
+            add_default_user_data(tenant_session, kullanici_id_master=yeni_kullanici.id)
+            # --------------------------------------------------------------------
+
+        return {"mesaj": f"'{firma_data.firma_unvani}' firması ve yönetici hesabı başarıyla oluşturuldu."}
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Firma oluşturma sırasında kritik hata: {e}", exc_info=True)
+        try:
+            engine = get_master_engine()
+            with engine.connect() as connection:
+                connection.execute(text("COMMIT"))
+                connection.execute(text(f"DROP DATABASE IF EXISTS \"{tenant_db_name}\""))
+        except Exception as drop_e:
+            logger.error(f"Hata sonrası veritabanı ({tenant_db_name}) silinemedi: {drop_e}")
+            
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Firma oluşturulurken bir hata oluştu: {str(e)}")
 
 # --- YÖNETİCİ İŞLEMLERİ (Backup/Restore Logic) ---
 

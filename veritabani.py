@@ -206,6 +206,34 @@ class OnMuhasebe:
             logger.error(f"Şirket bilgileri API'ye kaydedilemedi: {e}")
             return False, f"Şirket bilgileri kaydedilirken hata: {e}"
 
+    def sirket_bilgilerini_getir(self):
+        """API'den mevcut firmanın bilgilerini çeker."""
+        if not self.is_online:
+            return False, "Bu işlem için internet bağlantısı gereklidir."
+        try:
+            endpoint = f"{self.api_base_url}/sistem/sirket_bilgileri"
+            response = self.session.get(endpoint, timeout=10)
+            if response.status_code == 200:
+                return True, response.json()
+            else:
+                return False, response.json().get("detail", "Bilgiler alınamadı.")
+        except requests.exceptions.RequestException as e:
+            return False, f"API bağlantı hatası: {e}"
+        
+    def sirket_bilgilerini_guncelle(self, data: dict):
+        """API'ye güncel firma bilgilerini gönderir."""
+        if not self.is_online:
+            return False, "Bu işlem için internet bağlantısı gereklidir."
+        try:
+            endpoint = f"{self.api_base_url}/sistem/sirket_bilgileri"
+            response = self.session.put(endpoint, json=data, timeout=15)
+            if response.status_code == 200:
+                return True, response.json().get("mesaj", "Başarıyla güncellendi.")
+            else:
+                return False, response.json().get("detail", "Güncelleme başarısız.")
+        except requests.exceptions.RequestException as e:
+            return False, f"API bağlantı hatası: {e}"        
+
     # --- KULLANICI YÖNETİMİ ---
     def kullanici_dogrula(self, email: str, sifre: str) -> Optional[dict]:
         """
@@ -2130,6 +2158,27 @@ class OnMuhasebe:
             logger.warning(f"Access token yüklenirken hata oluştu: {e}")
             pass
 
+    def yeni_firma_olustur(self, firma_data: dict):
+        """Yeni bir firma (tenant) ve yönetici hesabı oluşturmak için API'ye istek gönderir."""
+        if not self.is_online:
+            return False, "Bu işlem için internet bağlantısı gereklidir."
+        
+        try:
+            # Sunucunuzdaki ilgili endpoint'in bu olduğunu varsayıyoruz.
+            # Gerekirse endpoint yolunu (örn: '/yonetici/firma_olustur') güncelleyin.
+            endpoint = f"{self.api_base_url}/yonetici/firma_olustur"
+            response = requests.post(endpoint, json=firma_data, timeout=20)
+            
+            if response.status_code == 201: # 201 Created
+                return True, response.json().get("mesaj", "Firma başarıyla oluşturuldu.")
+            else:
+                # Sunucudan gelen hata mesajını göster
+                error_detail = response.json().get("detail", "Bilinmeyen bir sunucu hatası.")
+                return False, f"Hata Kodu: {response.status_code} - {error_detail}"
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Firma oluşturma API isteği sırasında hata: {e}")
+            return False, f"API sunucusuna bağlanılamadı: {e}"
 
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.

@@ -1,3 +1,4 @@
+# create.py dosyasının tam işeriği
 import requests
 import json
 import logging

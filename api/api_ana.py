@@ -1,4 +1,4 @@
-# api/api_ana.py dosyasının TAMAMI (Database-per-Tenant Uyumlu Import ve Yaşam Döngüsü)
+# api/api_ana.py dosyasının TAMA İÇERİĞİ
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker 

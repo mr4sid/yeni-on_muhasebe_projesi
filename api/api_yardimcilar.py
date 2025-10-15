@@ -5,7 +5,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from . import modeller 
-from . import semalar 
 from . import veritabani
 from . import config  # <-- YENİ SATIR: config modülünü içe aktarıyoruz
 
@@ -62,7 +61,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
-        token_data = semalar.TokenData(email=email)
+        token_data = modeller.TokenData(email=email)
     except jwt.PyJWTError:
         raise credentials_exception
     

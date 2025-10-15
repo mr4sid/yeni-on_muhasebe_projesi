@@ -6,6 +6,9 @@ from .. import modeller, guvenlik, veritabani
 from ..api_servisler import CariHesaplamaService
 from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tedarikciler", tags=["Tedarikçiler"])
 
@@ -58,7 +61,6 @@ def read_tedarikciler(
     cari_hizmeti = CariHesaplamaService(db)
     tedarikciler_with_balance = []
     for tedarikci in tedarikciler:
-        # DÜZELTME 7: semalar.CariTipiEnum yerine modeller.CariTipiEnum kullanıldı
         net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci.id, modeller.CariTipiEnum.TEDARIKCI.value)
         tedarikci_dict = modeller.TedarikciRead.model_validate(tedarikci, from_attributes=True).model_dump()
         tedarikci_dict["net_bakiye"] = net_bakiye
@@ -88,21 +90,46 @@ def read_tedarikci(
 @router.put("/{tedarikci_id}", response_model=modeller.TedarikciRead)
 def update_tedarikci(
     tedarikci_id: int,
-    tedarikci: modeller.TedarikciUpdate,
+    tedarikci_update: modeller.TedarikciUpdate,
     db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # KRİTİK DÜZELTME 9: Sadece ID filtresi kullanılır
-    db_tedarikci = db.query(modeller.Tedarikci).filter(
-        modeller.Tedarikci.id == tedarikci_id
-    ).first()
+    """
+    ID'si verilen bir tedarikçi kaydını günceller.
+    Optimistic Locking (İyimser Kilitleme) uygular.
+    """
+    db_tedarikci = db.query(modeller.Tedarikci).filter(modeller.Tedarikci.id == tedarikci_id).first()
+
     if not db_tedarikci:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
-    for key, value in tedarikci.model_dump(exclude_unset=True).items():
+
+    # --- VERSION KONTROLÜ ---
+    if db_tedarikci.version != tedarikci_update.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Bu kayıt siz düzenlerken başka bir kullanıcı tarafından güncellendi. "
+                "Lütfen verileri yenileyip tekrar deneyin."
+            )
+        )
+    # --- KONTROL SONU ---
+
+    update_data = tedarikci_update.model_dump(exclude_unset=True, exclude={"version"})
+    
+    for key, value in update_data.items():
         setattr(db_tedarikci, key, value)
-    db.commit()
-    db.refresh(db_tedarikci)
-    return db_tedarikci
+    
+    try:
+        db.commit()
+        db.refresh(db_tedarikci)
+        return db_tedarikci
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Tedarikçi güncellenirken hata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Tedarikçi güncellenirken bir hata oluştu."
+        )
 
 @router.delete("/{tedarikci_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tedarikci(
@@ -134,6 +161,5 @@ def get_net_bakiye_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tedarikçi bulunamadı")
 
     cari_hizmeti = CariHesaplamaService(db)
-    # DÜZELTME 12: semalar.CariTipiEnum yerine modeller.CariTipiEnum kullanıldı
     net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(tedarikci_id, modeller.CariTipiEnum.TEDARIKCI.value)
     return {"net_bakiye": net_bakiye}

@@ -6,7 +6,7 @@ from typing import List, Optional, Union, Literal
 import enum
 from sqlalchemy.sql import func
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Text, DateTime,
+    Column, Integer, String, Float, Boolean, Text, DateTime, event,
     ForeignKey, Date, Enum, or_, and_, text, CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, declarative_base, foreign
@@ -25,6 +25,23 @@ class GelirGiderTipEnum(str, enum.Enum): GELİR = "GELİR"; GİDER = "GİDER"
 
 Base = declarative_base()
 
+class VersionedMixin:
+    """
+    Optimistic Locking için sürüm kontrolü ekler.
+    Her güncellemede 'version' alanını otomatik olarak bir artırır.
+    """
+    version = Column(Integer, nullable=False, server_default='1')
+
+    @staticmethod
+    def _increment_version(mapper, connection, target):
+        """Sürüm artırma listener'ı."""
+        target.version += 1
+
+    @classmethod
+    def __declare_last__(cls):
+        """Bu mixin'i kullanan tüm sınıflar için event listener'ı etkinleştirir."""
+        event.listen(cls, 'before_update', cls._increment_version)
+
 # --- PYDANTIC ŞEMALARI İÇİN TEMEL MODELLER ---
 class BaseOrmModel(BaseModel): model_config = ConfigDict(from_attributes=True)
 
@@ -32,23 +49,19 @@ class Firma(Base):
     __tablename__ = 'firmalar'
 
     id = Column(Integer, primary_key=True)
-    firma_adi = Column(String(200), unique=True, nullable=False)
-    tenant_db_name = Column(String(200), unique=True, nullable=False)
-
-    # Bu ForeignKey tanımı doğru
+    unvan = Column(String(200), unique=True, nullable=False) # 'firma_adi' -> 'unvan' olarak değiştirildi
+    db_adi = Column(String(200), unique=True, nullable=False) # 'tenant_db_name' -> 'db_adi' olarak değiştirildi
     kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id'))
-
-    # SQLAlchemy'ye hangi ForeignKey'i kullanacağını söylüyoruz
     kullanicilar = relationship("Kullanici", back_populates="firma", foreign_keys="[Kullanici.firma_id]")
     kurucu_personel = relationship("Kullanici", back_populates="kurdugu_firma", foreign_keys=[kurucu_personel_id])
 
 # --- SİRKET MODELLERİ (ORM) ---
-class SirketBilgileri(Base):
+class SirketBilgileri(VersionedMixin, Base):
     __tablename__ = 'sirket_bilgileri'; id = Column(Integer, primary_key=True); sirket_adi = Column(String(100), nullable=False); adres = Column(String(200)); telefon = Column(String(20)); email = Column(String(50)); vergi_dairesi = Column(String(100)); vergi_no = Column(String(20)); kullanici_id = Column(Integer, unique=True, nullable=False)
-class SirketAyarlari(Base):
+class SirketAyarlari(VersionedMixin, Base):
     __tablename__ = 'sirket_ayarlari'; id = Column(Integer, primary_key=True); ayar_adi = Column(String(100), unique=True, nullable=False); ayar_degeri = Column(String(255)); kullanici_id = Column(Integer, unique=True, nullable=False)
 
-class Sirket(Base): # Tenant DB'deki eski Sirket modelinin adı
+class Sirket(VersionedMixin, Base):
     __tablename__ = 'sirketler'
     id = Column(Integer, primary_key=True)
     sirket_adi = Column(String)
@@ -82,7 +95,7 @@ class SirketListResponse(BaseModel):
 # --- SİRKET MODELLERİ SONU ---
 
 # --- AYARLAR MODELLERİ ---
-class Ayarlar(Base):
+class Ayarlar(VersionedMixin, Base):
     __tablename__ = 'ayarlar'
     __table_args__ = (UniqueConstraint('ad', 'kullanici_id'),) 
     id = Column(Integer, primary_key=True, index=True)
@@ -93,7 +106,7 @@ class Ayarlar(Base):
 # --- AYARLAR MODELLERİ SONU ---
 
 # --- KULLANICI MODELLERİ (ORM) ---
-class Kullanici(Base):
+class Kullanici(VersionedMixin, Base):
     __tablename__ = 'kullanicilar'
 
     id = Column(Integer, primary_key=True)
@@ -103,15 +116,13 @@ class Kullanici(Base):
     email = Column(String(100), unique=True)
     telefon = Column(String(20))
 
-    # Bu ForeignKey tanımı doğru
     firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True)
     rol = Column(String(50), default='kullanici')
     aktif = Column(Boolean, default=True)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     son_giris_tarihi = Column(DateTime, nullable=True)
-    # SQLAlchemy'ye hangi ForeignKey'i kullanacağını söylüyoruz
+    
     firma = relationship("Firma", back_populates="kullanicilar", foreign_keys=[firma_id])
-    # Diğer ilişkiler (bunlar doğru)
     faturalar = relationship("Fatura", back_populates="kullanici")
     stoklar = relationship("Stok", back_populates="kullanici")
     kurdugu_firma = relationship("Firma", back_populates="kurucu_personel", foreign_keys=[Firma.kurucu_personel_id])
@@ -158,7 +169,7 @@ class KullaniciListResponse(BaseModel):
 # --- KULLANICI MODELLERİ SONU ---
 
 # --- CARİ (MÜŞTERİ/TEDARİKÇİ) MODELLERİ (ORM) ---
-class Musteri(Base):
+class Musteri(VersionedMixin, Base):
     __tablename__ = 'musteriler'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
@@ -190,7 +201,7 @@ class Musteri(Base):
                             back_populates="musteri",
                             overlaps="tedarikci, hareketler")
     
-class Tedarikci(Base):
+class Tedarikci(VersionedMixin, Base):
     __tablename__ = 'tedarikciler'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
@@ -236,7 +247,7 @@ class MusteriCreate(CariBase):
     kod: Optional[str] = None
     kullanici_id: Optional[int] = None
 
-class MusteriUpdate(CariBase):
+class MusteriUpdate(BaseModel):
     ad: Optional[str] = None
     kod: Optional[str] = None
     telefon: Optional[str] = None
@@ -246,6 +257,10 @@ class MusteriUpdate(CariBase):
     aktif: Optional[bool] = None
     kullanici_id: Optional[int] = None
     email: Optional[EmailStr] = None
+    version: int
+
+    class Config:
+        from_attributes = True
 
 class MusteriRead(CariBase):
     id: int
@@ -271,6 +286,9 @@ class TedarikciUpdate(CariBase):
     aktif: Optional[bool] = None
     kullanici_id: Optional[int] = None
     email: Optional[EmailStr] = None
+    version: int
+    class Config:
+        from_attributes = True
 
 class TedarikciRead(CariBase):
     id: int
@@ -288,7 +306,7 @@ class CariListResponse(BaseModel):
 # --- CARİ MODELLERİ SONU ---
 
 # --- KASA/BANKA MODELLERİ (ORM) ---
-class KasaBankaHesap(Base):
+class KasaBankaHesap(VersionedMixin, Base):
     __tablename__ = 'kasalar_bankalar'
     __table_args__ = (
         UniqueConstraint('hesap_adi', 'kullanici_id'),
@@ -339,7 +357,7 @@ class KasaBankaBase(BaseOrmModel):
 class KasaBankaCreate(KasaBankaBase):
     kullanici_id: Optional[int] = None
 
-class KasaBankaUpdate(KasaBankaBase):
+class KasaBankaUpdate(BaseModel):
     hesap_adi: Optional[str] = None
     tip: Optional[KasaBankaTipiEnum] = None
     bakiye: Optional[float] = None
@@ -352,6 +370,9 @@ class KasaBankaUpdate(KasaBankaBase):
     swift_kodu: Optional[str] = None
     varsayilan_odeme_turu: Optional[str] = None
     kullanici_id: Optional[int] = None
+    version: int
+    class Config:
+        from_attributes = True
 
 class KasaBankaRead(KasaBankaBase):
     id: int
@@ -363,7 +384,7 @@ class KasaBankaListResponse(BaseModel):
 # --- KASA/BANKA MODELLERİ SONU ---
 
 # --- STOK MODELLERİ (ORM) ---
-class Stok(Base):
+class Stok(VersionedMixin, Base):
     __tablename__ = 'stoklar'
 
     id = Column(Integer, primary_key=True)
@@ -419,7 +440,7 @@ class StokBase(BaseOrmModel):
 class StokCreate(StokBase):
     kullanici_id: Optional[int] = None
 
-class StokUpdate(StokBase):
+class StokUpdate(BaseModel):
     kod: Optional[str] = None
     ad: Optional[str] = None
     detay: Optional[str] = None
@@ -436,6 +457,10 @@ class StokUpdate(StokBase):
     birim_id: Optional[int] = None
     mense_id: Optional[int] = None
     kullanici_id: Optional[int] = None
+    version: int
+
+    class Config:
+        from_attributes = True
 
 class StokRead(StokBase):
     id: int
@@ -455,7 +480,7 @@ class AnlikStokMiktariResponse(BaseModel):
 # --- STOK MODELLERİ SONU ---
 
 # --- FATURA MODELLERİ (ORM) ---
-class Fatura(Base):
+class Fatura(VersionedMixin, Base):
     __tablename__ = 'faturalar'
     id = Column(Integer, primary_key=True)
     fatura_no = Column(String(50))
@@ -570,7 +595,7 @@ class FaturaCreate(FaturaBase):
     olusturan_kullanici_id: Optional[int] = None
     kullanici_id: Optional[int] = None
 
-class FaturaUpdate(FaturaBase):
+class FaturaUpdate(BaseModel):
     fatura_no: Optional[str] = None
     fatura_turu: Optional[FaturaTuruEnum] = None
     tarih: Optional[date] = None
@@ -586,6 +611,9 @@ class FaturaUpdate(FaturaBase):
     original_fatura_id: Optional[int] = None
     kalemler: Optional[List[FaturaKalemiCreate]] = None
     kullanici_id: Optional[int] = None
+    version: int
+    class Config:
+        from_attributes = True
 
 class FaturaRead(FaturaBase):
     id: int
@@ -668,7 +696,7 @@ class StokHareketListResponse(BaseModel):
 # --- STOK HAREKET MODELLERİ SONU ---
 
 # --- SİPARİŞ MODELLERİ (ORM) ---
-class Siparis(Base):
+class Siparis(VersionedMixin, Base):
     __tablename__ = 'siparisler'
     id = Column(Integer, primary_key=True)
     siparis_no = Column(String(50), unique=True)
@@ -772,7 +800,7 @@ class SiparisCreate(SiparisBase):
     kalemler: List[SiparisKalemiCreate] = []
     kullanici_id: Optional[int] = None
 
-class SiparisUpdate(SiparisBase):
+class SiparisUpdate(BaseModel):
     siparis_no: Optional[str] = None
     siparis_turu: Optional[SiparisTuruEnum] = None
     durum: Optional[SiparisDurumEnum] = None
@@ -787,7 +815,10 @@ class SiparisUpdate(SiparisBase):
     toplam_tutar: Optional[float] = None
     kalemler: Optional[List[SiparisKalemiCreate]] = None
     kullanici_id: Optional[int] = None
-
+    version: int
+    class Config:
+        from_attributes = True
+        
 class SiparisRead(SiparisBase):
     id: int
     olusturma_tarihi_saat: Optional[datetime] = None
@@ -814,7 +845,7 @@ class SiparisFaturaDonusum(BaseModel):
 # --- SİPARİŞ MODELLERİ SONU ---
 
 # --- GELİR/GİDER MODELLERİ (ORM) ---
-class GelirGider(Base):
+class GelirGider(VersionedMixin, Base):
     __tablename__ = 'gelir_giderler'
     id = Column(Integer, primary_key=True)
     tarih = Column(Date)
@@ -1024,42 +1055,42 @@ class KasaBankaHareketListResponse(BaseModel):
 # --- KASA/BANKA HAREKET MODELLERİ SONU ---
 
 # --- NİTELİK MODELLERİ (ORM) ---
-class UrunKategori(Base):
+class UrunKategori(VersionedMixin, Base):
     __tablename__ = 'urun_kategorileri'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
     kullanici_id = Column(Integer, nullable=False)
     stoklar = relationship("Stok", back_populates="kategori")
 
-class UrunMarka(Base):
+class UrunMarka(VersionedMixin, Base):
     __tablename__ = 'urun_markalari'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
     kullanici_id = Column(Integer, nullable=False)
     stoklar = relationship("Stok", back_populates="marka")
 
-class UrunGrubu(Base):
+class UrunGrubu(VersionedMixin, Base):
     __tablename__ = 'urun_gruplari'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
     kullanici_id = Column(Integer, nullable=False)
     stoklar = relationship("Stok", back_populates="urun_grubu")
 
-class UrunBirimi(Base):
+class UrunBirimi(VersionedMixin, Base):
     __tablename__ = 'urun_birimleri'
     id = Column(Integer, primary_key=True)
     ad = Column(String(50))
     kullanici_id = Column(Integer, nullable=False)
     stoklar = relationship("Stok", back_populates="birim")
 
-class Ulke(Base):
+class Ulke(VersionedMixin, Base):
     __tablename__ = 'ulkeler'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
     kullanici_id = Column(Integer, nullable=False)
     stoklar = relationship("Stok", back_populates="mense_ulke")
 
-class UrunNitelik(Base):
+class UrunNitelik(VersionedMixin, Base):
     __tablename__ = 'urun_nitelikleri'
     id = Column(Integer, primary_key=True, index=True)
     ad = Column(String(100), nullable=False)
@@ -1069,7 +1100,7 @@ class UrunNitelik(Base):
     # KRİTİK DÜZELTME: back_populates kaldırıldı ve viewonly=True eklendi.
     kullanici = relationship("Kullanici", foreign_keys=[kullanici_id], viewonly=True)
 
-class GelirSiniflandirma(Base):
+class GelirSiniflandirma(VersionedMixin, Base):
     __tablename__ = 'gelir_siniflandirmalari'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
@@ -1077,14 +1108,14 @@ class GelirSiniflandirma(Base):
     gelir_giderler = relationship("GelirGider", back_populates="gelir_siniflandirma")
 
 
-class GiderSiniflandirma(Base):
+class GiderSiniflandirma(VersionedMixin, Base):
     __tablename__ = 'gider_siniflandirmalari'
     id = Column(Integer, primary_key=True)
     ad = Column(String(100))
     kullanici_id = Column(Integer, nullable=False)
     gelir_giderler = relationship("GelirGider", back_populates="gider_siniflandirma")
 
-class Nitelik(Base):
+class Nitelik(VersionedMixin, Base):
     __tablename__ = 'nitelikler'
     id = Column(Integer, primary_key=True, index=True)
     tip = Column(String(50), index=True)
@@ -1092,7 +1123,7 @@ class Nitelik(Base):
     aciklama = Column(Text, nullable=True)
     aktif_durum = Column(Boolean, default=True)
 
-class CariHesap(Base):
+class CariHesap(VersionedMixin, Base):
     __tablename__ = 'cari_hesaplar'
     id = Column(Integer, primary_key=True)
     cari_id = Column(Integer)
@@ -1278,5 +1309,27 @@ class OfflineLoginResponse(Token):
     rol: str
     tenant_db_name: str
     sifre_hash: str
-    
+
 # --- RAPOR MODELLERİ SONU ---
+
+class TahsilatOdemeCreate(BaseModel):
+    tarih: date
+    cari_id: int
+    cari_tip: CariTipiEnum
+    kasa_banka_id: int
+    tutar: float
+    aciklama: Optional[str] = None
+
+class FirmaKayit(BaseModel):
+    firma_adi: str
+    yonetici_adi: str
+    yonetici_email: str
+    yonetici_sifre: str    
+
+class FirmaOlustur(BaseModel):
+    """Yeni bir firma ve yönetici hesabı oluşturmak için gereken bilgileri tanımlar."""
+    firma_unvani: str
+    yonetici_ad_soyad: str
+    yonetici_email: EmailStr
+    yonetici_telefon: str
+    yonetici_sifre: str    

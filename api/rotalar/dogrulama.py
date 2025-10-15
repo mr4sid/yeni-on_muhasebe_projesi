@@ -86,12 +86,12 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
     if not user or not verify_password(user_login.sifre, user.sifre_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Hatalı e-posta veya şifre.")
     
-    if not user.firma or not user.firma.tenant_db_name:
+    if not user.firma or not user.firma.db_adi:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Kullanıcının Tenant/Firma bilgisi eksik.")
 
-    tenant_db_name = user.firma.tenant_db_name
-    firma_adi = user.firma.firma_adi
-
+    tenant_db_name = user.firma.db_adi
+    firma_adi = user.firma.unvan
+    
     try:
         tenant_engine = get_tenant_engine(tenant_db_name)
         with tenant_engine.connect() as connection:

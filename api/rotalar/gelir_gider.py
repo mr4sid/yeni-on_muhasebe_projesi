@@ -6,8 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import date, datetime
 
-from .. import modeller, guvenlik # DÜZELTME 1: semalar kaldırıldı
-# KRİTİK DÜZELTME 2: Tenant DB'ye dinamik bağlanacak yeni bağımlılık kullanıldı.
+from .. import modeller, guvenlik
 from ..veritabani import get_db as get_tenant_db 
 
 router = APIRouter(

@@ -378,8 +378,8 @@ class StokYonetimiSayfasi(QWidget):
     def __init__(self, parent, db_manager, app_ref):
         super().__init__(parent)
         self.db = db_manager
-        self.app = app_ref
-        
+        self.app = app_ref       
+        self.current_user = getattr(self.app, 'current_user', {})
         self.main_layout = QGridLayout(self)
         self.after_timer = QTimer(self)
         self.after_timer.setSingleShot(True)
@@ -473,17 +473,17 @@ class StokYonetimiSayfasi(QWidget):
         button_layout = QHBoxLayout(button_frame)
         self.main_layout.addWidget(button_frame, 3, 0, 1, 1)
         
-        yeni_urun_ekle_button = QPushButton("Yeni Ürün Ekle")
-        yeni_urun_ekle_button.clicked.connect(self.yeni_urun_ekle_penceresi)
-        button_layout.addWidget(yeni_urun_ekle_button)
+        self.yeni_urun_ekle_button = QPushButton("Yeni Ürün Ekle")
+        self.yeni_urun_ekle_button.clicked.connect(self.yeni_urun_ekle_penceresi)
+        button_layout.addWidget(self.yeni_urun_ekle_button)
         
-        secili_urun_duzenle_button = QPushButton("Seçili Ürünü Düzenle")
-        secili_urun_duzenle_button.clicked.connect(self.secili_urun_duzenle)
-        button_layout.addWidget(secili_urun_duzenle_button)
+        self.secili_urun_duzenle_button = QPushButton("Seçili Ürünü Düzenle")
+        self.secili_urun_duzenle_button.clicked.connect(self.secili_urun_duzenle)
+        button_layout.addWidget(self.secili_urun_duzenle_button)
         
-        secili_urun_sil_button = QPushButton("Seçili Ürünü Sil")
-        secili_urun_sil_button.clicked.connect(self.secili_urun_sil)
-        button_layout.addWidget(secili_urun_sil_button)
+        self.secili_urun_sil_button = QPushButton("Seçili Ürünü Sil")
+        self.secili_urun_sil_button.clicked.connect(self.secili_urun_sil)
+        button_layout.addWidget(self.secili_urun_sil_button)
         
         kritik_stok_uyarisi_button = QPushButton("Kritik Stok Uyarısı")
         # kritik_stok_uyarisi_button.clicked.connect(self.app.show_critical_stock_warning)
@@ -535,11 +535,10 @@ class StokYonetimiSayfasi(QWidget):
         pagination_layout.addWidget(self.sonraki_sayfa_button)
         
         self.tree_stok.itemDoubleClicked.connect(self.secili_urun_duzenle)
-
-        # DÜZELTME: Doğru metot çağrısı yapıldı.
         self._yukle_filtre_comboboxlari()
         self.stok_listesini_yenile()
-        
+        self._yetkileri_uygula()
+
     def _yukle_filtre_comboboxlari(self):
         """Kategori, Marka ve diğer filtre combobox'larını doldurur."""
         try:
@@ -776,12 +775,23 @@ class StokYonetimiSayfasi(QWidget):
         else:
             self.app.set_status_message("Son sayfadasınız.", "orange")
 
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            self.yeni_urun_ekle_button.setEnabled(False)
+            self.secili_urun_duzenle_button.setEnabled(False)
+            self.secili_urun_sil_button.setEnabled(False)
+            print("Stok Yönetimi sayfası için personel yetkileri uygulandı.")
+
 class KasaBankaYonetimiSayfasi(QWidget): 
     def __init__(self, parent, db_manager, app_ref):
         super().__init__(parent)
         self.db = db_manager
         self.app = app_ref
         self.main_layout = QVBoxLayout(self) # Ana layout QVBoxLayout
+        self.current_user = getattr(self.app, 'current_user', {})
 
         self.after_timer = QTimer(self)
         self.after_timer.setSingleShot(True)
@@ -866,17 +876,17 @@ class KasaBankaYonetimiSayfasi(QWidget):
         button_layout_kb = QHBoxLayout(button_frame_kb)
         self.main_layout.addWidget(button_frame_kb)
 
-        yeni_hesap_ekle_button = QPushButton("Yeni Hesap Ekle")
-        yeni_hesap_ekle_button.clicked.connect(self.yeni_hesap_ekle_penceresi)
-        button_layout_kb.addWidget(yeni_hesap_ekle_button)
+        self.yeni_hesap_ekle_button = QPushButton("Yeni Hesap Ekle")
+        self.yeni_hesap_ekle_button.clicked.connect(self.yeni_hesap_ekle_penceresi)
+        button_layout_kb.addWidget(self.yeni_hesap_ekle_button)
 
-        secili_hesap_duzenle_button = QPushButton("Seçili Hesabı Düzenle")
-        secili_hesap_duzenle_button.clicked.connect(self.secili_hesap_duzenle)
-        button_layout_kb.addWidget(secili_hesap_duzenle_button)
+        self.secili_hesap_duzenle_button = QPushButton("Seçili Hesabı Düzenle")
+        self.secili_hesap_duzenle_button.clicked.connect(self.secili_hesap_duzenle)
+        button_layout_kb.addWidget(self.secili_hesap_duzenle_button)
 
-        secili_hesap_sil_button = QPushButton("Seçili Hesabı Sil")
-        secili_hesap_sil_button.clicked.connect(self.secili_hesap_sil)
-        button_layout_kb.addWidget(secili_hesap_sil_button)
+        self.secili_hesap_sil_button = QPushButton("Seçili Hesabı Sil")
+        self.secili_hesap_sil_button.clicked.connect(self.secili_hesap_sil)
+        button_layout_kb.addWidget(self.secili_hesap_sil_button)
         
         # Sayfalama
         pagination_frame_kb = QFrame(self)
@@ -891,8 +901,8 @@ class KasaBankaYonetimiSayfasi(QWidget):
         sonraki_sayfa_button_kb.clicked.connect(self.sonraki_sayfa_kb)
         pagination_layout_kb.addWidget(sonraki_sayfa_button_kb)
 
-
         self.hesap_listesini_yenile() # İlk yüklemeyi yap
+        self._yetkileri_uygula()
 
     def hesap_listesini_yenile(self):
         """API'den güncel kasa/banka listesini çeker ve TreeView'i günceller."""
@@ -1061,11 +1071,22 @@ class KasaBankaYonetimiSayfasi(QWidget):
         else:
             self.app.set_status_message("Son sayfadasınız.", "orange")    
 
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            self.yeni_hesap_ekle_button.setEnabled(False)
+            self.secili_hesap_duzenle_button.setEnabled(False)
+            self.secili_hesap_sil_button.setEnabled(False)
+            print("Kasa/Banka Yönetimi sayfası için personel yetkileri uygulandı.")
+
 class MusteriYonetimiSayfasi(QWidget):
     def __init__(self, parent, db_manager, app_ref):
         super().__init__(parent)
         self.db = db_manager
         self.app = app_ref
+        self.current_user = getattr(self.app, 'current_user', {})
         
         # CariService entegrasyonu için servisleri burada başlatıyoruz
         from hizmetler import CariService
@@ -1195,6 +1216,7 @@ class MusteriYonetimiSayfasi(QWidget):
         
         self.musteri_listesini_yenile()
         self.arama_entry.setFocus()
+        self._yetkileri_uygula()
 
     def secili_musteri_ekstre_buton_guncelle(self):
         selected_items = self.tree.selectedItems()
@@ -1245,6 +1267,11 @@ class MusteriYonetimiSayfasi(QWidget):
         self.btn_son_sayfa.setEnabled(self.mevcut_sayfa < self.total_pages)
                 
     def secili_musteri_sil(self):
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+        if kullanici_rolu.upper() != 'YONETICI':
+            QMessageBox.warning(self.app, "Yetki Hatası", "Bu işlemi yapmak için yetkiniz yok.")
+            return
+
         selected_items = self.tree.selectedItems()
         if not selected_items:
             self.app.set_status_message("Lütfen silmek istediğiniz müşteriyi seçin.")
@@ -1400,12 +1427,23 @@ class MusteriYonetimiSayfasi(QWidget):
             QMessageBox.critical(self, "Hata", f"Cari Hesap Ekstresi penceresi açılırken bir hata oluştu:\n{e}")
             self.app.set_status_message(f"Hata: Cari Hesap Ekstresi penceresi açılamadı - {e}")
 
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            self.btn_yeni_musteri.setEnabled(False)
+            # Silme işlemi doğrudan bir butonla değil, secili_musteri_sil metodu ile yapılıyor.
+            # Bu metodu çağıran bir context menu veya başka bir UI elemanı varsa
+            # onu da burada pasifleştirmek gerekir. Şimdilik sadece ana butonu pasifleştiriyoruz.
+            print("Müşteri Yönetimi sayfası için personel yetkileri uygulandı.")
+
 class TedarikciYonetimiSayfasi(QWidget):
     def __init__(self, parent, db_manager, app_ref):
         super().__init__(parent)
         self.db = db_manager
         self.app = app_ref
-
+        self.current_user = getattr(self.app, 'current_user', {})
         # CariService entegrasyonu için servisleri burada başlatıyoruz
         from hizmetler import CariService
         self.cari_service = CariService(self.db)
@@ -1534,6 +1572,7 @@ class TedarikciYonetimiSayfasi(QWidget):
 
         self.tedarikci_listesini_yenile()
         self.arama_entry.setFocus()
+        self._yetkileri_uygula()
 
     def secili_tedarikci_ekstre_buton_guncelle(self):
         selected_items = self.tree.selectedItems()
@@ -1584,6 +1623,11 @@ class TedarikciYonetimiSayfasi(QWidget):
         self.btn_son_sayfa.setEnabled(self.mevcut_sayfa < self.total_pages)
 
     def secili_tedarikci_sil(self):
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+        if kullanici_rolu.upper() != 'YONETICI':
+            QMessageBox.warning(self.app, "Yetki Hatası", "Bu işlemi yapmak için yetkiniz yok.")
+            return
+
         selected_items = self.tree.selectedItems()
         if not selected_items:
             self.app.set_status_message("Lütfen silmek istediğiniz tedarikçiyi seçin.")
@@ -1738,6 +1782,14 @@ class TedarikciYonetimiSayfasi(QWidget):
             QMessageBox.critical(self, "Hata", f"Cari Hesap Ekstresi penceresi açılırken bir hata oluştu:\n{e}")
             self.app.set_status_message(f"Hata: Cari Hesap Ekstresi penceresi açılamadı - {e}")
 
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            self.btn_yeni_tedarikci.setEnabled(False)
+            print("Tedarikçi Yönetimi sayfası için personel yetkileri uygulandı.")
+
 # FaturaListesiSayfasi sınıfı (Dönüştürülmüş PySide6 versiyonu)
 class FaturaListesiSayfasi(QWidget):
     def __init__(self, parent, db_manager, app_ref):
@@ -1824,8 +1876,8 @@ class SiparisListesiSayfasi(QWidget):
         super().__init__(parent)
         self.db = db_manager
         self.app = app_ref
+        self.current_user = getattr(self.app, 'current_user', {})
         from hizmetler import CariService
-        # DÜZELTME: CariService'e sadece db_manager parametresi gönderildi.
         self.cari_service = CariService(self.db)
         
         self.main_layout = QVBoxLayout(self)
@@ -1900,28 +1952,34 @@ class SiparisListesiSayfasi(QWidget):
         button_layout = QHBoxLayout(button_frame)
         self.main_layout.addWidget(button_frame)
         
-        yeni_musteri_siparisi_button = QPushButton("Yeni Müşteri Siparişi")
-        yeni_musteri_siparisi_button.clicked.connect(lambda: self.yeni_siparis_penceresi_ac(self.db.SIPARIS_TIP_SATIS))
-        button_layout.addWidget(yeni_musteri_siparisi_button)
-        yeni_tedarikci_siparisi_button = QPushButton("Yeni Tedarikçi Siparişi")
-        yeni_tedarikci_siparisi_button.clicked.connect(lambda: self.yeni_siparis_penceresi_ac(self.db.SIPARIS_TIP_ALIS))
-        button_layout.addWidget(yeni_tedarikci_siparisi_button)
+        self.yeni_musteri_siparisi_button = QPushButton("Yeni Müşteri Siparişi")
+        self.yeni_musteri_siparisi_button.clicked.connect(lambda: self.yeni_siparis_penceresi_ac(self.db.SIPARIS_TIP_SATIS))
+        button_layout.addWidget(self.yeni_musteri_siparisi_button)
+
+        self.yeni_tedarikci_siparisi_button = QPushButton("Yeni Tedarikçi Siparişi")
+        self.yeni_tedarikci_siparisi_button.clicked.connect(lambda: self.yeni_siparis_penceresi_ac(self.db.SIPARIS_TIP_ALIS))
+        button_layout.addWidget(self.yeni_tedarikci_siparisi_button)
+        
         self.detay_goster_button = QPushButton("Seçili Sipariş Detayları")
         self.detay_goster_button.clicked.connect(self.secili_siparis_detay_goster)
         self.detay_goster_button.setEnabled(False)
         button_layout.addWidget(self.detay_goster_button)
+
         self.duzenle_button = QPushButton("Seçili Siparişi Düzenle")
         self.duzenle_button.clicked.connect(self.secili_siparisi_duzenle)
         self.duzenle_button.setEnabled(False)
         button_layout.addWidget(self.duzenle_button)
+
         self.faturaya_donustur_button = QPushButton("Seçili Siparişi Faturaya Dönüştür")
         self.faturaya_donustur_button.clicked.connect(self.secili_siparisi_faturaya_donustur)
         self.faturaya_donustur_button.setEnabled(False)
         button_layout.addWidget(self.faturaya_donustur_button)
+
         self.sil_button = QPushButton("Seçili Siparişi Sil")
         self.sil_button.clicked.connect(self.secili_siparisi_sil)
         self.sil_button.setEnabled(False)
         button_layout.addWidget(self.sil_button)
+
         # Sayfalama için gerekli değişkenler ve widget'lar
         pagination_frame = QFrame(self)
         pagination_layout = QHBoxLayout(pagination_frame)
@@ -1966,6 +2024,7 @@ class SiparisListesiSayfasi(QWidget):
         self._yukle_filtre_comboboxlari() # Comboboxlar tanımlandıktan sonra çağır
         self.siparis_listesini_yukle() # Tüm UI elemanları kurulduktan sonra çağır
         self._on_siparis_select() # Buton durumlarını ayarla
+        self._yetkileri_uygula()
 
     def _open_date_picker(self, target_entry_qlineedit: QLineEdit):
         """
@@ -2423,11 +2482,24 @@ class SiparisListesiSayfasi(QWidget):
             self.mevcut_sayfa += 1
             self.siparis_listesini_yukle()
 
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            self.yeni_musteri_siparisi_button.setEnabled(False)
+            self.yeni_tedarikci_siparisi_button.setEnabled(False)
+            self.duzenle_button.setEnabled(False)
+            self.faturaya_donustur_button.setEnabled(False)
+            self.sil_button.setEnabled(False)
+            print("Sipariş Listesi sayfası için personel yetkileri uygulandı.")
+
 class BaseFaturaListesi(QWidget):
     def __init__(self, parent, db_manager, app_ref, fatura_tipi):
         super().__init__(parent)
         self.db = db_manager
         self.app = app_ref
+        self.current_user = getattr(self.app, 'current_user', {})
         self.parent = parent
         self.fatura_tipi = fatura_tipi
         self.main_layout = QVBoxLayout(self)
@@ -2458,6 +2530,7 @@ class BaseFaturaListesi(QWidget):
         self._yukle_filtre_comboboxlari()
         self.fatura_listesini_yukle()
         self._on_fatura_select()
+        self._yetkileri_uygula()
 
     def _create_ui_elements(self):
         """Tüm UI elemanlarını (filtreler, butonlar, treeview) oluşturan yardımcı metod."""
@@ -2895,6 +2968,23 @@ class BaseFaturaListesi(QWidget):
         except Exception as e:
             QMessageBox.critical(self.app, "Hata", f"Fatura Güncelleme penceresi açılırken bir hata oluştu:\n{e}")
             self.app.set_status_message(f"Hata: Fatura Güncelleme penceresi açılamadı - {e}", "red")
+
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            # Butonlar _create_ui_elements içinde self'e atanmıştı
+            if hasattr(self, 'btn_fatura_guncelle'):
+                self.btn_fatura_guncelle.setEnabled(False)
+            
+            if hasattr(self, 'btn_fatura_sil'):
+                self.btn_fatura_sil.setEnabled(False)
+            
+            if hasattr(self, 'btn_iade_faturasi'):
+                self.btn_iade_faturasi.setEnabled(False) # İade de bir nevi yeni fatura oluşturmaktır
+            
+            print(f"Fatura Listesi ({self.fatura_tipi}) sayfası için personel yetkileri uygulandı.")
 
 class SatisFaturalariListesi(BaseFaturaListesi):
     def __init__(self, parent, db_manager, app_ref, fatura_tipi):
@@ -7796,9 +7886,8 @@ class GirisEkrani(QDialog):
         return self._entry_username.text(), self._entry_password.text()
 
     def _open_user_registration_window(self):
-        from pencereler import KullaniciKayitPenceresi
-        kayit_penceresi = KullaniciKayitPenceresi(self, self.db)
-        kayit_penceresi.exec_()
+        kayit_penceresi = FirmaKayitPenceresi(self, self.db)
+        kayit_penceresi.exec() 
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -7904,6 +7993,104 @@ class GirisEkrani(QDialog):
             QMessageBox.critical(self, "Bağlantı Hatası", f"Giriş yapılırken bir hata oluştu: {e}")
             self._entry_password.clear()
             self._entry_password.setFocus()
+
+class FirmaKayitPenceresi(QDialog):
+    def __init__(self, parent=None, db_manager=None):
+        super().__init__(parent)
+        self.db = db_manager
+        self.setWindowTitle("Yeni Firma Hesabı Oluştur")
+        self.setMinimumWidth(450)
+
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setSpacing(15)
+
+        title_label = QLabel("Yeni Firma ve Yönetici Hesabı Oluşturun")
+        title_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title_label.setAlignment(Qt.AlignCenter)
+        self.main_layout.addWidget(title_label)
+
+        # --- Firma Bilgileri ---
+        firma_group = QFrame(self)
+        firma_group.setFrameShape(QFrame.StyledPanel)
+        firma_layout = QGridLayout(firma_group)
+        self.main_layout.addWidget(firma_group)
+
+        firma_layout.addWidget(QLabel("<b>Firma Bilgileri</b>"), 0, 0, 1, 2)
+        firma_layout.addWidget(QLabel("Firma Ünvanı (*):"), 1, 0)
+        self.firma_unvani_entry = QLineEdit()
+        self.firma_unvani_entry.setPlaceholderText("Örn: Çınar İnşaat Malzemeleri Ltd. Şti.")
+        firma_layout.addWidget(self.firma_unvani_entry, 1, 1)
+
+        # --- Yönetici Bilgileri ---
+        yonetici_group = QFrame(self)
+        yonetici_group.setFrameShape(QFrame.StyledPanel)
+        yonetici_layout = QGridLayout(yonetici_group)
+        self.main_layout.addWidget(yonetici_group)
+
+        yonetici_layout.addWidget(QLabel("<b>Yönetici Bilgileri</b>"), 0, 0, 1, 2)
+        yonetici_layout.addWidget(QLabel("Yönetici Adı Soyadı (*):"), 1, 0)
+        self.yonetici_ad_soyad_entry = QLineEdit()
+        yonetici_layout.addWidget(self.yonetici_ad_soyad_entry, 1, 1)
+
+        yonetici_layout.addWidget(QLabel("Yönetici E-postası (*):"), 2, 0)
+        self.yonetici_email_entry = QLineEdit()
+        yonetici_layout.addWidget(self.yonetici_email_entry, 2, 1)
+        
+        yonetici_layout.addWidget(QLabel("Telefon Numarası (*):"), 3, 0)
+        self.yonetici_telefon_entry = QLineEdit()
+        self.yonetici_telefon_entry.setPlaceholderText("Örn: 5551234567")
+        yonetici_layout.addWidget(self.yonetici_telefon_entry, 3, 1)
+
+        yonetici_layout.addWidget(QLabel("Şifre (*):"), 4, 0)
+        self.yonetici_sifre_entry = QLineEdit()
+        self.yonetici_sifre_entry.setEchoMode(QLineEdit.Password)
+        yonetici_layout.addWidget(self.yonetici_sifre_entry, 4, 1)
+
+        yonetici_layout.addWidget(QLabel("Şifre Tekrar (*):"), 5, 0)
+        self.yonetici_sifre_tekrar_entry = QLineEdit()
+        self.yonetici_sifre_tekrar_entry.setEchoMode(QLineEdit.Password)
+        yonetici_layout.addWidget(self.yonetici_sifre_tekrar_entry, 5, 1)
+
+        # --- Butonlar ---
+        self.kayit_ol_button = QPushButton("Hesabı Oluştur")
+        self.kayit_ol_button.clicked.connect(self._kayit_ol)
+        self.main_layout.addWidget(self.kayit_ol_button)
+
+    def _kayit_ol(self):
+        firma_unvani = self.firma_unvani_entry.text().strip()
+        yonetici_ad_soyad = self.yonetici_ad_soyad_entry.text().strip()
+        email = self.yonetici_email_entry.text().strip()
+        telefon = self.yonetici_telefon_entry.text().strip()
+        sifre = self.yonetici_sifre_entry.text()
+        sifre_tekrar = self.yonetici_sifre_tekrar_entry.text()
+
+        if not all([firma_unvani, yonetici_ad_soyad, email, telefon, sifre, sifre_tekrar]):
+            QMessageBox.warning(self, "Eksik Bilgi", "Lütfen tüm zorunlu (*) alanları doldurun.")
+            return
+
+        if sifre != sifre_tekrar:
+            QMessageBox.warning(self, "Şifre Hatası", "Girdiğiniz şifreler uyuşmuyor.")
+            return
+
+        yeni_firma_data = {
+            "firma_unvani": firma_unvani,
+            "yonetici_ad_soyad": yonetici_ad_soyad,
+            "yonetici_email": email,
+            "yonetici_telefon": telefon,
+            "yonetici_sifre": sifre
+        }
+
+        try:
+            success, message = self.db.yeni_firma_olustur(yeni_firma_data)
+            
+            if success:
+                QMessageBox.information(self, "Başarılı", f"Firma hesabı başarıyla oluşturuldu!\n\nE-posta: {email}\n\nLütfen bu bilgilerle giriş yapın.")
+                self.accept()
+            else:
+                QMessageBox.critical(self, "Kayıt Hatası", f"Hesap oluşturulamadı:\n{message}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Kritik Hata", f"Kayıt sırasında beklenmedik bir hata oluştu:\n{e}")
 
 class StokHareketleriSekmesi(QWidget):
     def __init__(self, parent, db_manager, urun_id, urun_adi, app_ref):
@@ -8134,7 +8321,7 @@ class KategoriMarkaYonetimiSekmesi(QWidget):
         super().__init__(parent_notebook)
         self.db = db_manager
         self.app = app_ref
-
+        self.current_user = getattr(self.app, 'current_user', {})
         self.main_layout = QHBoxLayout(self) # Ana layout yatay olacak
 
         # Sol taraf: Kategori Yönetimi
@@ -8150,17 +8337,17 @@ class KategoriMarkaYonetimiSekmesi(QWidget):
         kategori_layout.addWidget(self.kategori_entry, 1, 1, 1, 1) # Genişlesin
         kategori_layout.setColumnStretch(1, 1) # Entry sütunu genişlesin
 
-        ekle_kategori_button = QPushButton("Ekle")
-        ekle_kategori_button.clicked.connect(self._kategori_ekle_ui)
-        kategori_layout.addWidget(ekle_kategori_button, 1, 2)
+        self.ekle_kategori_button = QPushButton("Ekle")
+        self.ekle_kategori_button.clicked.connect(self._kategori_ekle_ui)
+        kategori_layout.addWidget(self.ekle_kategori_button, 1, 2)
 
-        guncelle_kategori_button = QPushButton("Güncelle")
-        guncelle_kategori_button.clicked.connect(self._kategori_guncelle_ui)
-        kategori_layout.addWidget(guncelle_kategori_button, 1, 3)
+        self.guncelle_kategori_button = QPushButton("Güncelle")
+        self.guncelle_kategori_button.clicked.connect(self._kategori_guncelle_ui)
+        kategori_layout.addWidget(self.guncelle_kategori_button, 1, 3)
 
-        sil_kategori_button = QPushButton("Sil")
-        sil_kategori_button.clicked.connect(self._kategori_sil_ui)
-        kategori_layout.addWidget(sil_kategori_button, 1, 4)
+        self.sil_kategori_button = QPushButton("Sil")
+        self.sil_kategori_button.clicked.connect(self._kategori_sil_ui)
+        kategori_layout.addWidget(self.sil_kategori_button, 1, 4)
 
         self.kategori_tree = QTreeWidget(kategori_frame)
         self.kategori_tree.setHeaderLabels(["ID", "Kategori Adı"])
@@ -8192,17 +8379,17 @@ class KategoriMarkaYonetimiSekmesi(QWidget):
         marka_layout.addWidget(self.marka_entry, 1, 1, 1, 1) # Genişlesin
         marka_layout.setColumnStretch(1, 1) # Entry sütunu genişlesin
 
-        ekle_marka_button = QPushButton("Ekle")
-        ekle_marka_button.clicked.connect(self._marka_ekle_ui)
-        marka_layout.addWidget(ekle_marka_button, 1, 2)
+        self.ekle_marka_button = QPushButton("Ekle")
+        self.ekle_marka_button.clicked.connect(self._marka_ekle_ui)
+        marka_layout.addWidget(self.ekle_marka_button, 1, 2)
 
-        guncelle_marka_button = QPushButton("Güncelle")
-        guncelle_marka_button.clicked.connect(self._marka_guncelle_ui)
-        marka_layout.addWidget(guncelle_marka_button, 1, 3)
+        self.guncelle_marka_button = QPushButton("Güncelle")
+        self.guncelle_marka_button.clicked.connect(self._marka_guncelle_ui)
+        marka_layout.addWidget(self.guncelle_marka_button, 1, 3)
 
-        sil_marka_button = QPushButton("Sil")
-        sil_marka_button.clicked.connect(self._marka_sil_ui)
-        marka_layout.addWidget(sil_marka_button, 1, 4)
+        self.sil_marka_button = QPushButton("Sil")
+        self.sil_marka_button.clicked.connect(self._marka_sil_ui)
+        marka_layout.addWidget(self.sil_marka_button, 1, 4)
 
         self.marka_tree = QTreeWidget(marka_frame)
         self.marka_tree.setHeaderLabels(["ID", "Marka Adı"])
@@ -8223,7 +8410,8 @@ class KategoriMarkaYonetimiSekmesi(QWidget):
         # İlk yüklemeleri yap
         self._kategori_listesini_yukle()
         self._marka_listesini_yukle()
-
+        self._yetkileri_uygula()
+        
     # Kategori Yönetimi Metotları
     def _kategori_listesini_yukle(self):
         self.kategori_tree.clear()
@@ -8395,6 +8583,21 @@ class KategoriMarkaYonetimiSekmesi(QWidget):
             QMessageBox.critical(self.app, "Beklenmeyen Hata", f"Marka eklenirken beklenmeyen bir hata oluştu:\n{e}")
             self.app.set_status_message(f"Marka eklenirken hata: {e}", "red")
             logging.error(f"Marka ekleme hatası: {e}", exc_info=True)
+
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        if kullanici_rolu.upper() != 'YONETICI':
+            # Kategori Butonları
+            self.ekle_kategori_button.setEnabled(False)
+            self.guncelle_kategori_button.setEnabled(False)
+            self.sil_kategori_button.setEnabled(False)
+            # Marka Butonları
+            self.ekle_marka_button.setEnabled(False)
+            self.guncelle_marka_button.setEnabled(False)
+            self.sil_marka_button.setEnabled(False)
+            print("Kategori/Marka Yönetimi sayfası için personel yetkileri uygulandı.")
 
     def _marka_guncelle_ui(self):
         selected_items = self.marka_tree.selectedItems()
@@ -8966,6 +9169,7 @@ class VeriYonetimiSekmesi(QWidget):
         super().__init__(parent_notebook)
         self.db = db_manager
         self.app = app_ref
+        self.current_user = getattr(self.app, 'current_user', {})        
         self.main_layout = QVBoxLayout(self)
 
         self.main_layout.addWidget(QLabel("Veri Yönetimi ve Senkronizasyon", font=QFont("Segoe UI", 16, QFont.Bold)), alignment=Qt.AlignCenter)
@@ -9038,7 +9242,8 @@ class VeriYonetimiSekmesi(QWidget):
         self.btn_geri_yukle.clicked.connect(self._geri_yukleme_baslat)
         
         self.main_layout.addStretch(1)
-
+        self._yetkileri_uygula()
+        
     def _yedekleme_baslat(self):
         """
         Veritabanı yedekleme işlemini başlatır.
@@ -9149,3 +9354,24 @@ class VeriYonetimiSekmesi(QWidget):
     def _toplu_veri_disa_aktarimi_ac(self, islem_tipi):
         QMessageBox.information(self, "Bilgi", f"'{islem_tipi}' toplu veri dışa aktarımı işlevi henüz geliştirilmedi.")
         self.app.set_status_message(f"'{islem_tipi}' toplu veri dışa aktarımı işlevi bekleniyor.", "orange")
+
+    def _yetkileri_uygula(self):
+        """Bu sayfadaki tüm butonları kullanıcının rolüne göre ayarlar."""
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        # Bu sayfadaki tüm işlemler yöneticiye özeldir.
+        is_admin = (kullanici_rolu.upper() == 'YONETICI')
+        
+        self.btn_manuel_sync.setEnabled(is_admin)
+        self.btn_temizle_db.setEnabled(is_admin)
+        self.btn_yedekle.setEnabled(is_admin)
+        self.btn_geri_yukle.setEnabled(is_admin)
+        self.btn_import_stok.setEnabled(is_admin)
+        self.btn_import_musteri.setEnabled(is_admin)
+        self.btn_import_tedarikci.setEnabled(is_admin)
+        self.btn_export_stok.setEnabled(is_admin)
+        self.btn_export_musteri.setEnabled(is_admin)
+        self.btn_export_tedarikci.setEnabled(is_admin)
+
+        if not is_admin:
+            print("Veri Yönetimi sayfası personel için tamamen kısıtlandı.")

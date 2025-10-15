@@ -5,7 +5,7 @@ from sqlalchemy import func, and_, extract, case, String
 from datetime import date, datetime, timedelta
 from typing import Optional, List
 from fastapi.responses import FileResponse
-from .. import modeller, guvenlik # DÜZELTME 1: semalar kaldırıldı
+from .. import modeller, guvenlik
 from .. import veritabani
 from ..api_servisler import CariHesaplamaService
 import openpyxl

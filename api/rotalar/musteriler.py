@@ -6,6 +6,9 @@ from .. import modeller, guvenlik, veritabani
 from ..api_servisler import CariHesaplamaService
 from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/musteriler", tags=["Müşteriler"])
 
@@ -129,43 +132,46 @@ def read_musteri(
 @router.put("/{musteri_id}", response_model=modeller.MusteriRead)
 def update_musteri(
     musteri_id: int,
-    musteri: modeller.MusteriUpdate,
-    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
+    musteri_update: modeller.MusteriUpdate,
+    db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
-    db_musteri = db.query(modeller.Musteri).filter(
-        modeller.Musteri.id == musteri_id
-    ).first()
-    
+    """
+    ID'si verilen bir müşteri kaydını günceller.
+    Optimistic Locking (İyimser Kilitleme) uygular.
+    """
+    db_musteri = db.query(modeller.Musteri).filter(modeller.Musteri.id == musteri_id).first()
+
     if not db_musteri:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Müşteri bulunamadı")
 
-    # Güncellenecek veriyi al (kullanici_id'yi ignore eder)
-    update_data = musteri.model_dump(exclude_unset=True)
-    if 'kullanici_id' in update_data:
-        del update_data['kullanici_id']
+    # --- VERSION KONTROLÜ ---
+    if db_musteri.version != musteri_update.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Bu kayıt siz düzenlerken başka bir kullanıcı tarafından güncellendi. "
+                "Lütfen verileri yenileyip tekrar deneyin."
+            )
+        )
+    # --- KONTROL SONU ---
 
+    update_data = musteri_update.model_dump(exclude_unset=True, exclude={"version"})
+    
     for key, value in update_data.items():
         setattr(db_musteri, key, value)
-        
-    db.commit()
-    db.refresh(db_musteri)
     
-    musteri_read = modeller.MusteriRead.model_validate(db_musteri, from_attributes=True)
-
-    # Cari bakiyeyi güncelleme sonrası tekrar çek (CariHesaplamaService'in varlığı varsayılır)
     try:
-        cari_hizmeti = CariHesaplamaService(db)
-        musteri_read.net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(musteri_id, modeller.CariTipiEnum.MUSTERI.value)
-    except NameError:
-        cari_hesap = db.query(modeller.CariHesap).filter(
-            modeller.CariHesap.cari_id == musteri_id, 
-            modeller.CariHesap.cari_tip == modeller.CariTipiEnum.MUSTERI.value
-        ).first()
-        musteri_read.net_bakiye = cari_hesap.bakiye if cari_hesap else 0.0
-    
-    return musteri_read
+        db.commit()
+        db.refresh(db_musteri)
+        return db_musteri
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Müşteri güncellenirken hata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Müşteri güncellenirken bir hata oluştu."
+        )
 
 @router.delete("/{musteri_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_musteri(

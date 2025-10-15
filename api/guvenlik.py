@@ -94,9 +94,8 @@ def get_current_user(
         firma = user.firma
         user_read = modeller.KullaniciRead.from_orm(user)
         # İlişkili alanları manuel olarak ata
-        user_read.firma_adi = firma.firma_adi if firma else None
-        user_read.tenant_db_name = firma.tenant_db_name if firma else None
-
+        user_read.firma_adi = firma.unvan if firma else None
+        user_read.tenant_db_name = firma.db_adi if firma else None
         return user_read
     except JWTError:
         raise credentials_exception

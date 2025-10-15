@@ -36,19 +36,23 @@ def setup_initial_database_and_user():
     Veritabanlarını sıfırlar, master tablolarını oluşturur ve ilk master kullanıcı ile firmasını
     doğrudan veritabanına ekler. API'ye bağımlı DEĞİLDİR.
     """
-    # 1. Veritabanlarını Sil ve Yeniden Oluştur
     engine_postgres = create_engine(POSTGRES_DB_URL, isolation_level='AUTOCOMMIT')
     try:
         with engine_postgres.connect() as connection:
-            databases_to_drop = [MASTER_DB_NAME, TENANT_DB_NAME_TO_DROP]
-            for db_name in databases_to_drop:
+            # Önceki denemelerden kalmış olabilecek TÜM tenant veritabanlarını bul ve sil
+            tenant_dbs_query = "SELECT datname FROM pg_database WHERE datname LIKE 'tenant_%%';"
+            existing_tenants = connection.execute(text(tenant_dbs_query)).fetchall()
+            
+            all_dbs_to_drop = [MASTER_DB_NAME] + [row[0] for row in existing_tenants]
+            
+            for db_name in all_dbs_to_drop:
                 logger.info(f"'{db_name}' veritabanına olan bağlantılar sonlandırılıyor...")
                 connection.execute(text(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}';"))
                 logger.info(f"'{db_name}' veritabanı siliniyor...")
-                connection.execute(text(f"DROP DATABASE IF EXISTS {db_name};"))
+                connection.execute(text(f"DROP DATABASE IF EXISTS \"{db_name}\";"))
 
             logger.info(f"'{MASTER_DB_NAME}' veritabanı yeniden oluşturuluyor...")
-            connection.execute(text(f"CREATE DATABASE {MASTER_DB_NAME} ENCODING 'UTF8';"))
+            connection.execute(text(f"CREATE DATABASE \"{MASTER_DB_NAME}\" ENCODING 'UTF8';"))
             logger.info("Veritabanı sıfırlama işlemi tamamlandı.")
     except Exception as e:
         logger.error(f"Veritabanı sıfırlama sırasında bir hata oluştu: {e}")
@@ -56,7 +60,7 @@ def setup_initial_database_and_user():
     finally:
         engine_postgres.dispose()
 
-    # 2. Master Tablolarını ve İlk Kullanıcıyı Oluştur
+    # 2. Master Tablolarını ve İlk Kullanıcıyı Oluştur (Bu kısım zaten doğru)
     engine_master = create_engine(MASTER_DB_URL)
     SessionMaster = sessionmaker(bind=engine_master)
     db = SessionMaster()
@@ -68,34 +72,28 @@ def setup_initial_database_and_user():
         logger.info("Varsayılan Kurucu Personel ve Firma doğrudan veritabanına ekleniyor...")
         default_email = "admin@master.com"
         
-        # Kullanıcı zaten var mı diye kontrol et
         if not db.query(Kullanici).filter_by(email=default_email).first():
             hashed_password = get_password_hash("755397")
             
-            # 1. Kurucu Personeli Oluştur
             default_user = Kullanici(
                 ad="Master",
                 soyad="Yönetici",
                 email=default_email,
                 telefon="0000000000",
                 sifre_hash=hashed_password,
-                rol="master"
+                rol="SUPERADMIN"
             )
             db.add(default_user)
-            db.flush()  # ID'yi alabilmek için
+            db.flush() 
 
-            # 2. Varsayılan Firmayı Oluştur
-            # Not: Bu aşamada tenant veritabanı fiziksel olarak oluşturulmaz,
-            # o işi register endpoint'i yapar. Burada sadece kaydını tutuyoruz.
             default_firma = Firma(
-                firma_adi="Master Yonetim Firmasi",
-                tenant_db_name="tenant_master_yonetim_firmasi", # İsimlendirme tutarlı olsun
+                unvan="Master Yonetim Firmasi",
+                db_adi="tenant_master_yonetim_firmasi",
                 kurucu_personel_id=default_user.id
             )
             db.add(default_firma)
-            db.flush() # ID'yi alabilmek için
+            db.flush()
 
-            # 3. Kullanıcıyı oluşturulan firmanın ID'sine bağla
             default_user.firma_id = default_firma.id
             
             db.commit()

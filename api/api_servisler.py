@@ -2,9 +2,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 import logging
 from datetime import datetime
-from . import semalar
 from sqlalchemy.orm import Session
-from .semalar import KasaBanka, Tedarikci, Musteri
+from .semalar import Tedarikci, Musteri
 from datetime import date
 from .modeller import KasaBankaHesap, Tedarikci, Musteri 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

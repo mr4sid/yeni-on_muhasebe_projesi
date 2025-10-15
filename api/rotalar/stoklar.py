@@ -186,21 +186,47 @@ def read_stok(
 @router.put("/{stok_id}", response_model=modeller.StokRead)
 def update_stok(
     stok_id: int,
-    stok: modeller.StokUpdate,
-    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
-    current_user: modeller.KullaniciRead = Depends(get_current_user)
+    stok_update: modeller.StokUpdate,
+    db: Session = Depends(veritabani.get_db),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
-    db_stok = db.query(modeller.Stok).filter(
-        modeller.Stok.id == stok_id
-    ).first()
+    """
+    ID'si verilen bir stok kaydını günceller.
+    Optimistic Locking (İyimser Kilitleme) uygular.
+    - Gelen 'version' numarası ile veritabanındaki 'version' eşleşmezse,
+      409 Conflict hatası döndürür.
+    - Eşleşirse, güncelleme yapılır ve 'version' otomatik olarak artırılır.
+    """
+    db_stok = db.query(modeller.Stok).filter(modeller.Stok.id == stok_id).first()
+
     if not db_stok:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok bulunamadı")
-    for key, value in stok.model_dump(exclude_unset=True).items():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stok kaydı bulunamadı")
+
+    # --- VERSION KONTROLÜ ---
+    # İstemcinin gönderdiği versiyon ile veritabanındaki versiyonu karşılaştır.
+    if db_stok.version != stok_update.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Bu kayıt siz düzenlerken başka bir kullanıcı tarafından güncellendi. "
+                   f"Lütfen verileri yenileyip tekrar deneyin. Sunucu Sürümü: {db_stok.version}, "
+                   f"Sizin Sürümünüz: {stok_update.version}"
+        )
+    # --- KONTROL SONU ---
+
+    # Güncelleme verilerini al (versiyonu hariç tutarak)
+    update_data = stok_update.model_dump(exclude_unset=True, exclude={"version"})
+    
+    for key, value in update_data.items():
         setattr(db_stok, key, value)
-    db.commit()
-    db.refresh(db_stok)
-    return db_stok
+    
+    try:
+        db.commit()
+        db.refresh(db_stok)
+        return db_stok
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Stok güncellenirken hata: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stok güncellenirken bir hata oluştu.")
 
 @router.delete("/{stok_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stok(

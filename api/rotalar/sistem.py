@@ -3,18 +3,18 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from typing import Dict, List, Any, Optional
+from datetime import datetime
 from .. import modeller 
-# KRİTİK DÜZELTME 1: get_master_db import edildi
-from ..veritabani import get_db as get_tenant_db, reset_db_connection, get_master_db 
+from .. import veritabani
 from .. import guvenlik
+import inspect
 
 router = APIRouter(prefix="/sistem", tags=["Sistem"])
 
-TENANT_DB_DEPENDENCY = get_tenant_db # Tenant DB dependency (diğer rotalar için)
-
 # HEALTH CHECK ROTASI
 @router.get("/status", response_model=dict)
-def get_sistem_status(db: Session = Depends(get_master_db)): # KRİTİK DÜZELTME 2: Master DB kullanılır
+def get_sistem_status(db: Session = Depends(veritabani.get_master_db)): # KRİTİK DÜZELTME 2: Master DB kullanılır
     try:
         # Master DB bağlantı kontrolü
         db.execute(text("SELECT 1"))
@@ -29,7 +29,7 @@ def get_sistem_status(db: Session = Depends(get_master_db)): # KRİTİK DÜZELTM
 @router.get("/varsayilan_cariler/perakende_musteri_id", response_model=modeller.DefaultIdResponse)
 def get_perakende_musteri_id_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     musteri = db.query(modeller.Musteri).filter(modeller.Musteri.kod == "PERAKENDE_MUSTERI").first()
@@ -43,7 +43,7 @@ def get_perakende_musteri_id_endpoint(
 @router.get("/varsayilan_cariler/genel_tedarikci_id", response_model=modeller.DefaultIdResponse)
 def get_genel_tedarikci_id_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     tedarikci = db.query(modeller.Tedarikci).filter(modeller.Tedarikci.kod == "GENEL_TEDARIKCI").first()
@@ -58,7 +58,7 @@ def get_genel_tedarikci_id_endpoint(
 def get_varsayilan_kasa_banka_endpoint(
     odeme_turu: str, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     hesap_tipi = None
     varsayilan_ad = None
@@ -98,7 +98,7 @@ def get_varsayilan_kasa_banka_endpoint(
 @router.get("/bilgiler", response_model=modeller.SirketRead)
 def get_sirket_bilgileri_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI! 
     sirket_bilgisi = db.query(modeller.Sirket).first() 
@@ -113,7 +113,7 @@ def get_sirket_bilgileri_endpoint(
 def update_sirket_bilgileri_endpoint(
     sirket_update: modeller.SirketCreate, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     sirket_bilgisi = db.query(modeller.Sirket).first() 
@@ -133,7 +133,7 @@ def update_sirket_bilgileri_endpoint(
 def get_next_fatura_number_endpoint(
     fatura_turu: str, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     last_fatura = db.query(modeller.Fatura).filter(modeller.Fatura.fatura_turu == fatura_turu.upper()) \
@@ -162,7 +162,7 @@ def get_next_fatura_number_endpoint(
 @router.get("/next_musteri_code", response_model=modeller.NextCodeResponse)
 def get_next_musteri_code_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     last_musteri = db.query(modeller.Musteri).order_by(modeller.Musteri.kod.desc()).first()
@@ -183,7 +183,7 @@ def get_next_musteri_code_endpoint(
 @router.get("/next_tedarikci_code", response_model=modeller.NextCodeResponse)
 def get_next_tedarikci_code_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     last_tedarikci = db.query(modeller.Tedarikci).order_by(modeller.Tedarikci.kod.desc()).first()
@@ -204,7 +204,7 @@ def get_next_tedarikci_code_endpoint(
 @router.get("/next_stok_code", response_model=modeller.NextCodeResponse)
 def get_next_stok_code_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     last_stok = db.query(modeller.Stok).order_by(modeller.Stok.kod.desc()).first()
@@ -225,7 +225,7 @@ def get_next_stok_code_endpoint(
 @router.get("/next_siparis_kodu", response_model=modeller.NextSiparisKoduResponse)
 def get_next_siparis_kodu_endpoint(
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
     son_siparis = db.query(modeller.Siparis).order_by(modeller.Siparis.id.desc()).first() 
@@ -245,7 +245,7 @@ def get_next_siparis_kodu_endpoint(
     return {"next_code": next_code}
 
 @router.get("/status", response_model=dict)
-def get_sistem_status(db: Session = Depends(get_master_db)):
+def get_sistem_status(db: Session = Depends(veritabani.get_master_db)):
     try:
         db.execute(text("SELECT 1"))
         return {"status": "ok", "database": "connected"}
@@ -257,13 +257,13 @@ def get_sistem_status(db: Session = Depends(get_master_db)):
 
 @router.post("/veritabani_baglantilarini_kapat")
 async def veritabani_baglantilarini_kapat():
-    reset_db_connection()
+    veritabani.reset_db_connection()
     return PlainTextResponse("Veritabanı bağlantıları başarıyla kapatıldı.")
 
 @router.get("/next_fatura_no", response_model=modeller.NextCodeResponse)
 def get_next_fatura_no_endpoint(
     fatura_turu: modeller.FaturaTuruEnum = Query(..., description="Fatura türü (SATIS/ALIŞ)"),
-    db: Session = Depends(TENANT_DB_DEPENDENCY), # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
     # DÜZELTME: IZOLASYON FILTRESI KALDIRILDI!
@@ -287,3 +287,49 @@ def get_next_fatura_no_endpoint(
             pass
     next_fatura_no = f"{prefix}{next_sequence:09d}"
     return {"next_code": next_fatura_no}
+
+# VersionedMixin ekli olan tüm ana modelleri otomatik olarak bulmak için inspect ve issubclass kullanılabilir.
+
+@router.get("/sync", response_model=Dict[str, List[Dict[str, Any]]])
+def sync_data(
+    last_sync_timestamp: Optional[datetime] = None,
+    db: Session = Depends(veritabani.get_db),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+):
+    """
+    Belirtilen bir zamandan sonra oluşturulmuş veya güncellenmiş olan tüm verileri
+    senkronizasyon için istemciye gönderir.
+
+    Eğer last_sync_timestamp verilmezse, tüm verileri gönderir.
+    """
+
+    # VersionedMixin ekli olan tüm ana modelleri otomatik olarak bul
+    sync_models = {}
+    for name, obj in inspect.getmembers(modeller):
+        if inspect.isclass(obj):
+            # VersionedMixin'e sahip ve SQLAlchemy tablosu olan ana modelleri seç
+            if hasattr(modeller, "VersionedMixin") and issubclass(obj, modeller.VersionedMixin):
+                # Sadece tabloya sahip olanları ekle (SQLAlchemy Base'den türemiş olmalı)
+                if hasattr(obj, "__tablename__"):
+                    sync_models[obj.__tablename__] = obj
+
+    response_data = {}
+
+    for name, model in sync_models.items():
+        query = db.query(model)
+
+        # Eğer modelde 'son_guncelleme_tarihi_saat' gibi bir zaman damgası kolonu varsa,
+        # bu kolonu kullanarak daha verimli sorgulama yapabiliriz.
+        if last_sync_timestamp and hasattr(model, 'son_guncelleme_tarihi_saat'):
+            query = query.filter(model.son_guncelleme_tarihi_saat > last_sync_timestamp)
+
+        results = query.all()
+
+        items_list = []
+        for item in results:
+            item_dict = {c.name: getattr(item, c.name) for c in item.__table__.columns}
+            items_list.append(item_dict)
+
+        response_data[name] = items_list
+
+    return response_data

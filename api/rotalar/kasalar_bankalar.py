@@ -2,13 +2,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from .. import modeller # DÜZELTME: semalar kaldırıldı
+from .. import modeller
 # KRİTİK DÜZELTME 1: Tenant DB'ye dinamik bağlanacak yeni bağımlılık kullanıldı.
-from ..veritabani import get_db as get_tenant_db 
+from .. import veritabani
 from datetime import date
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .. import guvenlik
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/kasalar_bankalar",
     tags=["Kasa ve Banka Hesapları"]
@@ -18,9 +20,6 @@ router = APIRouter(
 def _convert_empty_to_none(data: dict) -> dict:
     return {k: v if v != "" else None for k, v in data.items()}
 
-# KRİTİK DÜZELTME 2: Tenant DB bağlantısı için kullanılacak bağımlılık
-TENANT_DB_DEPENDENCY = get_tenant_db
-
 @router.get("/", response_model=modeller.KasaBankaListResponse)
 def read_kasalar_bankalar(
     skip: int = 0,
@@ -29,7 +28,7 @@ def read_kasalar_bankalar(
     tip: Optional[modeller.KasaBankaTipiEnum] = None, # DÜZELTME: modeller.KasaBankaTipiEnum kullanıldı
     aktif_durum: Optional[bool] = None,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user), 
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 3: IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.KasaBankaHesap)
@@ -54,7 +53,7 @@ def read_kasalar_bankalar(
 def create_kasa_banka(
     hesap: modeller.KasaBankaCreate,
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY)
+    db: Session = Depends(veritabani.get_db)
 ):
     try:
         # acilis_bakiyesi'ni modelden alıp geri kalan veriyi ayırıyoruz
@@ -105,27 +104,50 @@ def update_kasa_banka(
     hesap_id: int, 
     hesap: modeller.KasaBankaUpdate, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
-    # KRİTİK DÜZELTME 6: IZOLASYON FILTRESI KALDIRILDI!
+    """
+    ID'si verilen bir kasa/banka hesabını günceller.
+    Optimistic Locking (İyimser Kilitleme) uygular.
+    """
     db_hesap = db.query(modeller.KasaBankaHesap).filter(modeller.KasaBankaHesap.id == hesap_id).first()
+    
     if db_hesap is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kasa/Banka hesabı bulunamadı")
     
-    # KRİTİK DÜZELTME 7: Boş stringleri None'a çevir
-    hesap_data = _convert_empty_to_none(hesap.model_dump(exclude_unset=True))
+    # --- VERSION KONTROLÜ ---
+    if db_hesap.version != hesap.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Bu kayıt siz düzenlerken başka bir kullanıcı tarafından güncellendi. "
+                "Lütfen verileri yenileyip tekrar deneyin."
+            )
+        )
+    # --- KONTROL SONU ---
+    
+    hesap_data = _convert_empty_to_none(hesap.model_dump(exclude_unset=True, exclude={"version"}))
+
     for key, value in hesap_data.items():
         setattr(db_hesap, key, value)
     
-    db.commit()
-    db.refresh(db_hesap)
-    return db_hesap
+    try:
+        db.commit()
+        db.refresh(db_hesap)
+        return db_hesap
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Kasa/Banka güncellenirken hata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Kasa/Banka hesabı güncellenirken bir hata oluştu."
+        )
 
 @router.delete("/{hesap_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_kasa_banka(
     hesap_id: int, 
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
-    db: Session = Depends(TENANT_DB_DEPENDENCY) # Tenant DB kullanılır
+    db: Session = Depends(veritabani.get_db) # Tenant DB kullanılır
 ):
     # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
     db_hesap = db.query(modeller.KasaBankaHesap).filter(modeller.KasaBankaHesap.id == hesap_id).first()
@@ -140,3 +162,130 @@ def delete_kasa_banka(
     db.delete(db_hesap)
     db.commit()
     return
+
+@router.post("/tahsilat", response_model=modeller.CariHareketRead, status_code=status.HTTP_201_CREATED)
+def tahsilat_ekle(
+    tahsilat: modeller.TahsilatOdemeCreate,
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
+    db: Session = Depends(veritabani.get_db)
+):
+    """
+    Bir cariden tahsilat yapar. İşlem atomiktir.
+    - Kasa/Banka hesabına GİRİŞ hareketi oluşturur.
+    - Kasa/Banka hesabının bakiyesini artırır.
+    - Cari hesaba BORÇ hareketi oluşturur (alacağı azaltır).
+    - Tüm işlemler başarısız olursa geri alınır.
+    """
+    try:
+        with db.begin_nested():
+            # 1. Kasa/Banka hesabını bul ve kontrol et
+            kasa_hesap = db.query(modeller.KasaBankaHesap).filter(modeller.KasaBankaHesap.id == tahsilat.kasa_banka_id).first()
+            if not kasa_hesap:
+                raise ValueError(f"ID'si {tahsilat.kasa_banka_id} olan Kasa/Banka hesabı bulunamadı.")
+            
+            # 2. Cari hesabı bul ve kontrol et
+            # Not: Cari modelinizin ne olduğunu varsayarak (Musteri/Tedarikci) esnek bir yapı kurulabilir.
+            # Şimdilik cari_id'nin geçerli olduğunu varsayıyoruz.
+
+            # 3. Kasa/Banka Hareketini Oluştur (Giriş)
+            kasa_hareket = modeller.KasaBankaHareket(
+                kasa_banka_id=tahsilat.kasa_banka_id,
+                tarih=tahsilat.tarih,
+                islem_turu="TAHSİLAT",
+                islem_yone=modeller.IslemYoneEnum.GIRIS,
+                tutar=tahsilat.tutar,
+                aciklama=tahsilat.aciklama,
+                kaynak=modeller.KaynakTipEnum.MANUEL, # Manuel işlem olarak işaretliyoruz
+                kullanici_id=1 
+            )
+            db.add(kasa_hareket)
+
+            # 4. Kasa/Banka Bakiyesini Güncelle
+            kasa_hesap.bakiye += tahsilat.tutar
+            
+            # 5. Cari Hareketini Oluştur (Borç - Müşterinin alacağını azaltır)
+            cari_hareket = modeller.CariHareket(
+                cari_id=tahsilat.cari_id,
+                cari_tip=tahsilat.cari_tip,
+                tarih=tahsilat.tarih,
+                islem_turu="TAHSİLAT",
+                islem_yone=modeller.IslemYoneEnum.BORC,
+                tutar=tahsilat.tutar,
+                aciklama=tahsilat.aciklama,
+                kaynak=modeller.KaynakTipEnum.MANUEL,
+                kasa_banka_id=tahsilat.kasa_banka_id,
+                kullanici_id=1
+            )
+            db.add(cari_hareket)
+
+            db.commit()
+            db.refresh(cari_hareket)
+            return cari_hareket
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Tahsilat eklenirken hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Tahsilat işlemi sırasında bir hata oluştu: {str(e)}")
+    
+@router.post("/odeme", response_model=modeller.CariHareketRead, status_code=status.HTTP_201_CREATED)
+def odeme_ekle(
+    odeme: modeller.TahsilatOdemeCreate,
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
+    db: Session = Depends(veritabani.get_db)
+):
+    """
+    Bir cariye ödeme yapar. İşlem atomiktir.
+    - Kasa/Banka hesabına ÇIKIŞ hareketi oluşturur.
+    - Kasa/Banka hesabının bakiyesini azaltır.
+    - Cari hesaba ALACAK hareketi oluşturur (borcu azaltır).
+    - Tüm işlemler başarısız olursa geri alınır.
+    """
+    try:
+        with db.begin_nested():
+            # 1. Kasa/Banka hesabını bul ve kontrol et
+            kasa_hesap = db.query(modeller.KasaBankaHesap).filter(modeller.KasaBankaHesap.id == odeme.kasa_banka_id).first()
+            if not kasa_hesap:
+                raise ValueError(f"ID'si {odeme.kasa_banka_id} olan Kasa/Banka hesabı bulunamadı.")
+
+            # 2. Cari hesabı bul ve kontrol et (varsayım)
+
+            # 3. Kasa/Banka Hareketini Oluştur (Çıkış)
+            kasa_hareket = modeller.KasaBankaHareket(
+                kasa_banka_id=odeme.kasa_banka_id,
+                tarih=odeme.tarih,
+                islem_turu="ÖDEME",
+                islem_yone=modeller.IslemYoneEnum.CIKIS,
+                tutar=odeme.tutar,
+                aciklama=odeme.aciklama,
+                kaynak=modeller.KaynakTipEnum.MANUEL,
+                kullanici_id=1
+            )
+            db.add(kasa_hareket)
+
+            # 4. Kasa/Banka Bakiyesini Güncelle
+            kasa_hesap.bakiye -= odeme.tutar
+            
+            # 5. Cari Hareketini Oluştur (Alacak - Tedarikçinin borcunu azaltır)
+            cari_hareket = modeller.CariHareket(
+                cari_id=odeme.cari_id,
+                cari_tip=odeme.cari_tip,
+                tarih=odeme.tarih,
+                islem_turu="ÖDEME",
+                islem_yone=modeller.IslemYoneEnum.ALACAK,
+                tutar=odeme.tutar,
+                aciklama=odeme.aciklama,
+                kaynak=modeller.KaynakTipEnum.MANUEL,
+                kasa_banka_id=odeme.kasa_banka_id,
+                kullanici_id=1
+            )
+            db.add(cari_hareket)
+            
+            db.commit()
+            db.refresh(cari_hareket)
+            return cari_hareket
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ödeme eklenirken hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Ödeme işlemi sırasında bir hata oluştu: {str(e)}")
+        

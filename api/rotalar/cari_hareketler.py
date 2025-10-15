@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from .. import modeller, guvenlik # DÜZELTME 1: semalar kaldırıldı
+from .. import modeller, guvenlik
 from ..veritabani import get_db as get_tenant_db # KRİTİK DÜZELTME 2: Tenant DB'ye yönlendirildi
 from datetime import date
 from sqlalchemy.exc import IntegrityError

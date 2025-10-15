@@ -1,4 +1,4 @@
-#main.py Dosyasının. Tam içeriği. (Güncellenmiş)
+#main.py Dosyasının. Tam içeriği
 import sys
 import os
 import json
@@ -296,6 +296,7 @@ class App(QMainWindow):
 
         self._setup_ui_elements()
         self._setup_ui_connections()
+        self.yetkileri_uygula()
         self._update_status_bar()
         self.set_status_message("Uygulama başlatılıyor, sunucuya bağlanılıyor...")
 
@@ -819,6 +820,38 @@ class App(QMainWindow):
                                  f"Yeni API adresine bağlanılamadı: {e}\n"
                                  "Lütfen API sunucusunun çalıştığından ve doğru adreste olduğundan emin olun.")
             logger.critical(f"API URL güncellemesi sonrası bağlantı hatası: {e}")
+
+    def yetkileri_uygula(self):
+        """
+        Giriş yapan kullanıcının rolüne göre arayüzdeki (UI) yetkileri ayarlar.
+        Menüleri, butonları ve diğer arayüz elemanlarını gizler veya pasifleştirir.
+        """
+        # Kullanıcı verisi bir sözlük olduğu için rolü .get() ile güvenli bir şekilde alıyoruz
+        kullanici_rolu = self.current_user.get('rol', 'yok')
+
+        # Rol kontrolünü büyük harfe çevirerek yapalım (YONETICI, personel vs. gibi farklı yazımlara karşı)
+        if kullanici_rolu.upper() != 'YONETICI':
+            print(f"'{kullanici_rolu}' rolü için yetkiler uygulanıyor...")
+
+            # Yönetici Ayarları menü öğesini pasifleştir (Gizlemek yerine)
+            # Not: Menünün kendisi self.ui_main_window_setup içinde değil, doğrudan self üzerinde
+            if hasattr(self, 'actionY_netici_Ayarlar'):
+                self.actionY_netici_Ayarlar.setEnabled(False)
+                print(" - Yönetici Ayarları menü öğesi pasifleştirildi.")
+
+            # Örnek: Veri Yönetimi menü öğesini pasifleştir
+            if hasattr(self, 'actionVeri_Yonetimi'):
+                self.actionVeri_Yonetimi.setEnabled(False)
+                print(" - Veri Yönetimi menü öğesi pasifleştirildi.")
+            
+            # Gerekirse diğer kısıtlamaları da buraya ekleyebilirsiniz.
+            # Örneğin, toplu veri aktarımını engellemek isterseniz:
+            # if hasattr(self, 'actionToplu_Veri_Aktar_m'):
+            #     self.actionToplu_Veri_Aktar_m.setEnabled(False)
+            #     print(" - Toplu Veri Aktarımı pasifleştirildi.")
+
+        else:
+            print("Yönetici rolü için tüm yetkiler aktif.")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
