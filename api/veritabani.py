@@ -2,14 +2,17 @@
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.exc import OperationalError
 import logging
 from typing import Dict, Generator
 from fastapi import HTTPException, status, Depends
-from . import guvenlik, modeller
-
+from jose import jwt
+from .database_core import create_tenant_engine_and_session
+from . import modeller, semalar
+from .guvenlik import oauth2_scheme
+from .config import settings
 # Loglama ayarları
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -40,8 +43,6 @@ except Exception as e:
     MasterSessionLocal = None
 
 tenant_engines: Dict[str, Engine] = {}
-
-Base = declarative_base()
 
 # --- YARDIMCI FONKSİYONLAR (YENİ EKLENDİ) ---
 
@@ -145,22 +146,44 @@ def get_tenant_engine(tenant_db_name: str) -> Engine:
         logger.info(f"Yeni Tenant DB motoru başlatıldı: {tenant_db_name}")
     return tenant_engines[tenant_db_name]
 
-def get_db(current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)) -> Generator:
-    """Kullanıcı token'ından alınan bilgiye göre tenant veritabanı oturumu sağlar."""
-    tenant_db_name = getattr(current_user, 'tenant_db_name', None)
-    if not tenant_db_name:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Kullanıcıya atanmış bir firma veritabanı bulunamadı."
-        )
+def get_db(token: str = Depends(oauth2_scheme)):
+    """
+    Token'ı çözümleyerek kullanıcıyı bulur ve kullanıcının ilişkili olduğu
+    firma veritabanına (tenant) bir oturum (session) sağlar.
+    """
+    from . import guvenlik
 
-    engine = get_tenant_engine(tenant_db_name)
-    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = TenantSessionLocal()
+    db = None
+    master_db_session = next(get_master_db()) # <-- 1. ADIM: Master DB'yi al
     try:
+        # <-- 2. ADIM: Aldığın Master DB'yi get_current_user'a parametre olarak ver
+        current_user = guvenlik.get_current_user(token=token, db=master_db_session)
+
+        tenant_db_name = None
+        if hasattr(current_user, 'firma') and current_user.firma:
+            tenant_db_name = current_user.firma.db_adi
+        
+        if not tenant_db_name:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            tenant_db_name = payload.get("firma_db")
+            if not tenant_db_name:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Kullanıcıya atanmış bir firma veritabanı bulunamadı."
+                )
+
+        db = get_tenant_session_by_name(tenant_db_name)
         yield db
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Veritabanı oturumu oluşturulurken bir hata oluştu: {e}")
     finally:
-        db.close()
+        if db is not None:
+            db.close()
+        if master_db_session is not None:
+            master_db_session.close()
 
 # get_tenant_db fonksiyonu get_db'nin bir varyasyonu olarak düzeltildi
 def get_tenant_db(tenant_db_name: str) -> Generator:
@@ -190,3 +213,10 @@ def reset_db_connection():
     
     tenant_engines.clear()
     logger.info("Tüm Master ve Tenant veritabanı bağlantıları sıfırlandı.")
+
+def get_tenant_session_by_name(db_name: str):
+    """
+    Verilen veritabanı ismine göre yeni bir veritabanı oturumu (session) oluşturur ve döndürür.
+    """
+    SessionLocal_tenant = create_tenant_engine_and_session(db_name)
+    return SessionLocal_tenant()    

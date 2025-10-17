@@ -1,4 +1,4 @@
-# 'create_or_update_pg_tables.py' dosyasının API'den bağımsız nihai hali
+# 'create_or_update_pg_tables.py' dosyasının tam içeriği
 import os
 import logging
 from dotenv import load_dotenv
@@ -89,6 +89,7 @@ def setup_initial_database_and_user():
             default_firma = Firma(
                 unvan="Master Yonetim Firmasi",
                 db_adi="tenant_master_yonetim_firmasi",
+                firma_no="mv1000",
                 kurucu_personel_id=default_user.id
             )
             db.add(default_firma)

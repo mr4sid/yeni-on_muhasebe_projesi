@@ -11,7 +11,8 @@ from datetime import datetime, date, timedelta
 from PySide6.QtWidgets import (QApplication,
     QWidget,QDialog, QLabel, QPushButton, QTabWidget, QMessageBox,
     QGridLayout, QVBoxLayout, QHBoxLayout, QFrame,
-    QLineEdit, QMainWindow, QFileDialog, QComboBox, QTreeWidget, QTreeWidgetItem, QAbstractItemView,
+    QLineEdit, QMainWindow, QFileDialog, QComboBox, QTreeWidget, QTreeWidgetItem, QAbstractItemView, QRadioButton,
+    QButtonGroup,
     QHeaderView, QTextEdit, QGroupBox, QMenu, QTableWidgetItem, QCheckBox, QListWidget, QListWidgetItem)
 
 from PySide6.QtCore import Qt, QTimer, Signal, QLocale
@@ -79,11 +80,16 @@ class AnaSayfa(QWidget):
         self.app = app_ref
         self.db = db_manager
         self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(20, 20, 20, 20) # Kenar boşlukları eklendi
+        self.main_layout.setSpacing(20) # Widget'lar arası boşluk eklendi
 
-        self.title_label = QLabel("Çınar Yapı Ön Muhasebe Programı - Genel Bakış")
+        # --- Başlık ---
+        self.title_label = QLabel("Genel Bakış ve Hızlı İşlemler")
         self.title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        self.title_label.setStyleSheet("color: #333;")
         self.main_layout.addWidget(self.title_label, alignment=Qt.AlignCenter)
 
+        # --- Özet Bilgiler Bölümü (Aynen Korundu) ---
         self.ozet_bilgiler_frame = QFrame(self)
         self.ozet_bilgiler_layout = QHBoxLayout(self.ozet_bilgiler_frame)
         self.main_layout.addWidget(self.ozet_bilgiler_frame)
@@ -94,7 +100,7 @@ class AnaSayfa(QWidget):
         self.ozet_satislar_group.setLayout(QVBoxLayout())
         self.ozet_satislar_group.layout().addWidget(self.lbl_toplam_satis_degeri, alignment=Qt.AlignCenter)
         self.ozet_bilgiler_layout.addWidget(self.ozet_satislar_group)
-
+        # ... (Diğer özet grupları aynı şekilde devam ediyor)
         self.ozet_alislar_group = QGroupBox("Toplam Alışlar")
         self.lbl_toplam_alis_degeri = QLabel("0,00 TL")
         self.lbl_toplam_alis_degeri.setFont(QFont("Segoe UI", 14, QFont.Bold))
@@ -116,75 +122,52 @@ class AnaSayfa(QWidget):
         self.ozet_odemeler_group.layout().addWidget(self.lbl_toplam_odeme_degeri, alignment=Qt.AlignCenter)
         self.ozet_bilgiler_layout.addWidget(self.ozet_odemeler_group)
 
-        self.ozet_kritik_stok_group = QGroupBox("Kritik Stok")
-        self.lbl_kritik_stok_sayisi = QLabel("0")
-        self.lbl_kritik_stok_sayisi.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        self.ozet_kritik_stok_group.setLayout(QVBoxLayout())
-        self.ozet_kritik_stok_group.layout().addWidget(self.lbl_kritik_stok_sayisi, alignment=Qt.AlignCenter)
-        self.ozet_bilgiler_layout.addWidget(self.ozet_kritik_stok_group)
-        self.main_layout.addSpacing(20)
-
+        # --- Hızlı Menüler (3x3 Grid Olarak Yeniden Düzenlendi) ---
         self.hizli_menuler_frame = QFrame(self)
         self.hizli_menuler_layout = QGridLayout(self.hizli_menuler_frame)
         self.main_layout.addWidget(self.hizli_menuler_frame)
-        self.main_layout.addStretch()
+        # Butonların tüm dikey alanı kaplaması için
+        self.main_layout.setStretchFactor(self.hizli_menuler_frame, 1)
 
-        button_style = "QPushButton { padding: 25px; font-size: 14pt; border-radius: 10px; border: 1px solid #ccc; background-color: #fdfdfd; } QPushButton:hover { background-color: #e6e6e6; border: 1px solid #aaa; }"
+        button_style = """
+            QPushButton { 
+                padding: 20px; 
+                font-size: 14pt; 
+                border-radius: 10px; 
+                border: 1px solid #ccc; 
+                background-color: #f8f9fa; 
+            } 
+            QPushButton:hover { 
+                background-color: #e9ecef; 
+                border: 1px solid #adb5bd; 
+            }
+        """
         
-        btn_yeni_satis_faturasi = QPushButton("📝 Yeni Satış Faturası")
-        btn_yeni_satis_faturasi.setStyleSheet(button_style)
-        btn_yeni_satis_faturasi.clicked.connect(lambda: self.app.fatura_listesi_sayfasi.yeni_fatura_ekle_ui(self.db.FATURA_TIP_SATIS))
-        self.hizli_menuler_layout.addWidget(btn_yeni_satis_faturasi, 0, 0)
-        
-        btn_yeni_alis_faturasi = QPushButton("🛒 Yeni Alış Faturası")
-        btn_yeni_alis_faturasi.setStyleSheet(button_style)
-        btn_yeni_alis_faturasi.clicked.connect(lambda: self.app.fatura_listesi_sayfasi.yeni_fatura_ekle_ui(self.db.FATURA_TIP_ALIS))
-        self.hizli_menuler_layout.addWidget(btn_yeni_alis_faturasi, 0, 1)
+        # Butonları bir listede tanımlayarak daha temiz bir kod yapısı
+        buttons = [
+            ("📝 Yeni Satış Faturası", lambda: self.app.show_tab("Faturalar").yeni_fatura_ekle_ui(self.db.FATURA_TIP_SATIS)),
+            ("🛒 Yeni Alış Faturası", lambda: self.app.show_tab("Faturalar").yeni_fatura_ekle_ui(self.db.FATURA_TIP_ALIS)),
+            ("📦 Stok Yönetimi", lambda: self.app.show_tab("Stok Yönetimi")),
+            ("👥 Müşteri Yönetimi", lambda: self.app.show_tab("Müşteri Yönetimi")),
+            ("🚚 Tedarikçi Yönetimi", lambda: self.app.show_tab("Tedarikçi Yönetimi")),
+            ("🧾 Faturalar", lambda: self.app.show_tab("Faturalar")),
+            ("💰 Kasa/Banka", lambda: self.app.show_tab("Kasa/Banka")),
+            ("💸 Gelir/Gider", lambda: self.app.show_tab("Gelir/Gider")),
+            ("📋 Siparişler", lambda: self.app.show_tab("Sipariş Yönetimi"))
+        ]
 
-        btn_faturalar = QPushButton("🧾 Faturalar")
-        btn_faturalar.setStyleSheet(button_style)
-        btn_faturalar.clicked.connect(lambda: self.app.show_tab("Faturalar"))
-        self.hizli_menuler_layout.addWidget(btn_faturalar, 0, 2)
-        
-        btn_kasa_banka_yonetimi = QPushButton("🏦 Kasa/Banka Yönetimi")
-        btn_kasa_banka_yonetimi.setStyleSheet(button_style)
-        btn_kasa_banka_yonetimi.clicked.connect(lambda: self.app.show_tab("Kasa/Banka"))
-        self.hizli_menuler_layout.addWidget(btn_kasa_banka_yonetimi, 1, 0)
-        
-        btn_musteri_yonetimi = QPushButton("👥 Müşteri Yönetimi")
-        btn_musteri_yonetimi.setStyleSheet(button_style)
-        btn_musteri_yonetimi.clicked.connect(lambda: self.app.show_tab("Müşteri Yönetimi"))
-        self.hizli_menuler_layout.addWidget(btn_musteri_yonetimi, 1, 1)
-        
-        btn_tedarikci_yonetimi = QPushButton("🚚 Tedarikçi Yönetimi")
-        btn_tedarikci_yonetimi.setStyleSheet(button_style)
-        btn_tedarikci_yonetimi.clicked.connect(lambda: self.app.show_tab("Tedarikçi Yönetimi"))
-        self.hizli_menuler_layout.addWidget(btn_tedarikci_yonetimi, 1, 2)
+        # Butonları 3x3 grid'e yerleştir
+        positions = [(i, j) for i in range(3) for j in range(3)]
+        for position, (text, action) in zip(positions, buttons):
+            button = QPushButton(text)
+            button.setStyleSheet(button_style)
+            # Yüksekliği genişleyebilir yap
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            button.clicked.connect(action)
+            self.hizli_menuler_layout.addWidget(button, position[0], position[1])
 
-        self.hizli_menuler_layout.setColumnStretch(0, 1)
-        self.hizli_menuler_layout.setColumnStretch(1, 1)
-        self.hizli_menuler_layout.setColumnStretch(2, 1)
+        # --- GRAFİK VE İLGİLİ METOTLAR TAMAMEN KALDIRILDI ---
 
-        self.aylik_grafik_frame = QFrame(self)
-        self.aylik_grafik_layout = QVBoxLayout(self.aylik_grafik_frame)
-        self.main_layout.addWidget(self.aylik_grafik_frame)
-        self.aylik_grafik_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self.en_cok_satanlar_frame = QFrame(self)
-        self.en_cok_satanlar_layout = QVBoxLayout(self.en_cok_satanlar_frame)
-        self.main_layout.addWidget(self.en_cok_satanlar_frame)
-
-        self.en_cok_satanlar_label = QLabel("En Çok Satan Ürünler")
-        self.en_cok_satanlar_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.en_cok_satanlar_layout.addWidget(self.en_cok_satanlar_label)
-
-        self.en_cok_satanlar_list = QListWidget(self.en_cok_satanlar_frame)
-        self.en_cok_satanlar_layout.addWidget(self.en_cok_satanlar_list)
-
-        self.aylik_grafik_figure = Figure()
-        self.aylik_grafik_canvas = FigureCanvas(self.aylik_grafik_figure)
-        self.aylik_grafik_layout.addWidget(self.aylik_grafik_canvas)
-        
         self.guncelle_ozet_bilgiler()
 
     def closeEvent(self, event):
@@ -236,26 +219,23 @@ class AnaSayfa(QWidget):
             baslangic_tarihi = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             bitis_tarihi = datetime.now().strftime('%Y-%m-%d')
             
-            ozet_data = self.db.get_dashboard_summary(
+            ozet_data, error = self.db.get_dashboard_summary(
                 baslangic_tarihi=baslangic_tarihi,
                 bitis_tarihi=bitis_tarihi
             )
             
+            if error:
+                print(f"Dashboard özeti yüklenemedi: {error}")
+                return
+
             if ozet_data:
                 self.lbl_toplam_satis_degeri.setText(self.db._format_currency(ozet_data.get('toplam_satislar', 0.0)))
                 self.lbl_toplam_alis_degeri.setText(self.db._format_currency(ozet_data.get('toplam_alislar', 0.0)))
                 self.lbl_toplam_tahsilat_degeri.setText(self.db._format_currency(ozet_data.get('toplam_tahsilatlar', 0.0)))
                 self.lbl_toplam_odeme_degeri.setText(self.db._format_currency(ozet_data.get('toplam_odemeler', 0.0)))
-                self.lbl_kritik_stok_sayisi.setText(str(ozet_data.get('kritik_stok_sayisi', 0)))
-                
-                self.en_cok_satanlar_list.clear()
-                for urun in ozet_data.get('en_cok_satan_urunler', []):
-                    self.en_cok_satanlar_list.addItem(f"{urun.get('ad', '-')}")
-                
-                self.ciz_aylik_satis_alıs_grafik()
 
         except Exception as e:
-            QMessageBox.critical(self.app, "API Hatası", f"Dashboard özeti yüklenirken hata: {e}")
+            # QMessageBox.critical(self.app, "API Hatası", f"Dashboard özeti yüklenirken hata: {e}")
             logger.error(f"Dashboard özeti yüklenirken hata: {e}")
 
     def ciz_aylik_satis_alıs_grafik(self):
@@ -7831,7 +7811,7 @@ class GirisEkrani(QDialog):
         super().__init__(parent)
         self.db = db_manager
         self.setWindowTitle("Kullanıcı Girişi")
-        self.setFixedSize(350, 250)
+        self.setFixedSize(350, 300) # Pencereyi biraz büyütüyoruz
 
         self._main_layout = QVBoxLayout(self)
 
@@ -7840,6 +7820,22 @@ class GirisEkrani(QDialog):
         self.logo_label.setAlignment(Qt.AlignCenter)
         self._main_layout.addWidget(self.logo_label)
 
+        # --- YENİ EKLENEN BÖLÜM: GİRİŞ TÜRÜ SEÇİMİ ---
+        self.radio_button_group = QButtonGroup(self)
+        self.radio_yonetici = QRadioButton("Yönetici Girişi")
+        self.radio_personel = QRadioButton("Personel Girişi")
+        self.radio_button_group.addButton(self.radio_yonetici)
+        self.radio_button_group.addButton(self.radio_personel)
+        self.radio_yonetici.setChecked(True)
+
+        radio_layout = QHBoxLayout()
+        radio_layout.addStretch()
+        radio_layout.addWidget(self.radio_yonetici)
+        radio_layout.addWidget(self.radio_personel)
+        radio_layout.addStretch()
+        self._main_layout.addLayout(radio_layout)
+        # --- YENİ BÖLÜM SONU ---
+
         self._frame = QFrame(self)
         self._frame.setFrameShape(QFrame.StyledPanel)
         self._frame.setLineWidth(1)
@@ -7847,24 +7843,36 @@ class GirisEkrani(QDialog):
 
         self._form_layout = QGridLayout(self._frame)
 
-        # KRİTİK DÜZELTME 4: Kullanıcı Adı -> E-posta
-        self._form_layout.addWidget(QLabel("E-posta:"), 0, 0)
-        self._entry_username = QLineEdit() # Bu, kullanıcının e-postasını tutacak
-        self._entry_username.setPlaceholderText("E-posta adresinizi giriniz") # Placeholder eklendi
-        self._form_layout.addWidget(self._entry_username, 0, 1)
+        # --- YENİ EKLENEN BÖLÜM: FİRMA NO ALANI ---
+        self.label_firma_no = QLabel("Firma No:")
+        self._entry_firma_no = QLineEdit()
+        self._entry_firma_no.setPlaceholderText("Firma numaranızı giriniz")
+        self._form_layout.addWidget(self.label_firma_no, 0, 0)
+        self._form_layout.addWidget(self._entry_firma_no, 0, 1)
+        # --- YENİ BÖLÜM SONU ---
 
-        self._form_layout.addWidget(QLabel("Şifre:"), 1, 0)
+        self.label_username = QLabel("E-posta:")
+        self._entry_username = QLineEdit()
+        self._entry_username.setPlaceholderText("E-posta veya kullanıcı adı")
+        self._form_layout.addWidget(self.label_username, 1, 0)
+        self._form_layout.addWidget(self._entry_username, 1, 1)
+
+
+        self._form_layout.addWidget(QLabel("Şifre:"), 2, 0)
         self._entry_password = QLineEdit()
         self._entry_password.setEchoMode(QLineEdit.Password)
-        self._form_layout.addWidget(self._entry_password, 1, 1)
+        self._form_layout.addWidget(self._entry_password, 2, 1)
 
         self._main_layout.addStretch()
 
         self._btn_login = QPushButton("Giriş Yap")
-        self._btn_login.clicked.connect(self._on_login_clicked)
-
         self._btn_register = QPushButton("Yeni Hesap Oluştur")
+
+        # --- SİNYALLER ---
+        self._btn_login.clicked.connect(self._on_login_clicked)
         self._btn_register.clicked.connect(self._open_user_registration_window)
+        self.radio_button_group.buttonClicked.connect(self._toggle_login_type)
+
 
         self._button_layout = QHBoxLayout()
         self._button_layout.addStretch()
@@ -7874,121 +7882,82 @@ class GirisEkrani(QDialog):
 
         self._main_layout.addLayout(self._button_layout)
         self._main_layout.addStretch()
-        self._main_layout.addStretch()
 
-        # main.py'den last_username değerini yükleyelim
         from main import load_config
         app_config = load_config()
         self._entry_username.setText(app_config.get('last_username', ''))
         self._entry_username.setFocus()
+        
+        # Başlangıç durumu için arayüzü ayarla
+        self._toggle_login_type()
 
-    def get_credentials(self):
-        return self._entry_username.text(), self._entry_password.text()
+    def _toggle_login_type(self):
+        """Giriş türü seçimine göre arayüzü dinamik olarak günceller."""
+        if self.radio_yonetici.isChecked():
+            self.label_username.setText("E-posta:")
+            self._entry_username.setPlaceholderText("E-posta adresinizi giriniz")
+            self.label_firma_no.hide()
+            self._entry_firma_no.hide()
+        else: # Personel seçili
+            self.label_username.setText("Kullanıcı Adı:")
+            self._entry_username.setPlaceholderText("Kullanıcı adınızı giriniz")
+            self.label_firma_no.show()
+            self._entry_firma_no.show()
+        
+        self._entry_username.clear()
+        self._entry_password.clear()
+        self._entry_firma_no.clear()
 
     def _open_user_registration_window(self):
         kayit_penceresi = FirmaKayitPenceresi(self, self.db)
-        kayit_penceresi.exec() 
-
-    def _setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # İçeriği tutacak ana çerçeve
-        content_frame = QFrame(self)
-        content_frame.setStyleSheet("""
-            QFrame {
-                background-color: #f0f0f0;
-                border-radius: 15px;
-            }
-        """)
-        content_frame.setFrameShape(QFrame.StyledPanel)
-        content_frame.setFrameShadow(QFrame.Raised)
-        
-        content_layout = QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(25, 25, 25, 25)
-        
-        # Başlık
-        title_label = QLabel("Çınar Yapı Ön Muhasebe Programı")
-        title_label.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        content_layout.addWidget(title_label)
-        content_layout.addSpacing(15)
-
-        # Giriş Formu
-        form_layout = QGridLayout()
-        form_layout.addWidget(QLabel("Kullanıcı Adı:"), 0, 0)
-        self.kullanici_adi_entry = QLineEdit()
-        self.kullanici_adi_entry.setPlaceholderText("Kullanıcı adınızı giriniz")
-        form_layout.addWidget(self.kullanici_adi_entry, 0, 1)
-
-        form_layout.addWidget(QLabel("Şifre:"), 1, 0)
-        self.sifre_entry = QLineEdit()
-        self.sifre_entry.setPlaceholderText("Şifrenizi giriniz")
-        self.sifre_entry.setEchoMode(QLineEdit.Password)
-        form_layout.addWidget(self.sifre_entry, 1, 1)
-        content_layout.addLayout(form_layout)
-        content_layout.addSpacing(15)
-
-        self.giris_butonu = QPushButton("Giriş")
-        self.giris_butonu.setMinimumHeight(35)
-        self.giris_butonu.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self.giris_butonu.setStyleSheet("background-color: #4CAF50; color: white; border-radius: 5px;")
-        self.giris_butonu.clicked.connect(self._on_login_clicked)
-        content_layout.addWidget(self.giris_butonu)
-
-        main_layout.addWidget(content_frame)
-
-        from main import load_config
-        app_config = load_config()
-        self.kullanici_adi_entry.setText(app_config.get('last_username', ''))
-        self.kullanici_adi_entry.setFocus()
-
-    def _initial_load_data(self):
-        sirket_adi_giris = "Şirket Adınız"
-        if self.db.is_online:
-            sirket_bilgileri = self.db.sirket_bilgilerini_yukle(self.parent_app.current_user_id) if hasattr(self.parent_app, 'current_user_id') else None
-            if sirket_bilgileri:
-                sirket_adi_giris = sirket_bilgileri.get("sirket_adi", "Şirket Adınız")
-            else:
-                sirket_adi_giris = "Şirket Bilgisi Yüklenemedi (Online)"
-        else:
-            sirket_adi_giris = "Şirket Bilgisi Yüklenemedi (Offline)"
-            
-        sirket_label_bottom = QLabel(sirket_adi_giris)
-        sirket_label_bottom.setFont(QFont("Segoe UI", 10))
-        self.layout().addWidget(sirket_label_bottom, alignment=Qt.AlignCenter | Qt.AlignBottom)
+        kayit_penceresi.exec()
 
     def _on_login_clicked(self):
-        # KRİTİK DÜZELTME 5: Kullanıcı Adı yerine E-posta gönderilir
-        email = self._entry_username.text()
         sifre = self._entry_password.text()
-
-        if not email or not sifre:
-            QMessageBox.warning(self, "Hata", "Lütfen E-posta ve şifre giriniz.")
-            return
-            
-        from main import save_config, load_config
-        app_config = load_config()
-        app_config['last_username'] = email # Son girilen e-postayı kaydet
-        save_config(app_config)
-
+        result = None
+        
         try:
-            # 1. Doğrulama çağrısı (Artık email kullanır)
-            result = self.db.kullanici_dogrula(email, sifre)
+            if self.radio_yonetici.isChecked():
+                # --- YÖNETİCİ GİRİŞİ ---
+                email = self._entry_username.text()
+                if not email or not sifre:
+                    QMessageBox.warning(self, "Hata", "Lütfen E-posta ve şifre giriniz.")
+                    return
+                
+                # --- ÇÖZÜM BURADA: E-postayı config dosyasına kaydetme ---
+                from main import save_config, load_config
+                app_config = load_config()
+                app_config['last_username'] = email
+                save_config(app_config)
+                # --- ÇÖZÜM SONU ---
+                
+                # Mevcut yönetici doğrulama metodunu kullanıyoruz
+                result = self.db.kullanici_dogrula(email, sifre)
 
-            # 2. Sonucu Kontrol Et ve Sinyali Gönder
-            if isinstance(result, dict) and "kullanici_id" in result:
-                self.login_success.emit(result)  
+            else:
+                # --- PERSONEL GİRİŞİ ---
+                firma_no = self._entry_firma_no.text()
+                kullanici_adi = self._entry_username.text()
+                if not firma_no or not kullanici_adi or not sifre:
+                    QMessageBox.warning(self, "Hata", "Tüm alanları doldurunuz.")
+                    return
+                
+                # Yeni personel doğrulama metodunu kullanıyoruz
+                result = self.db.personel_giris(firma_no, kullanici_adi, sifre)
+
+            # --- ORTAK SONUÇ DEĞERLENDİRME ---
+            if isinstance(result, dict) and "access_token" in result:
+                self.login_success.emit(result)
                 self.accept()
             else:
-                hata_mesaji = "E-posta veya şifre hatalı."
-                if isinstance(result, tuple) and len(result) > 1:
-                    hata_mesaji = result[1]
+                hata_mesaji = "Giriş bilgileri hatalı veya bir sorun oluştu."
+                if isinstance(result, dict) and "detail" in result:
+                    hata_mesaji = result["detail"]
                 
                 QMessageBox.critical(self, "Giriş Hatası", hata_mesaji)
                 self._entry_password.clear()
                 self._entry_password.setFocus()
-                
+
         except Exception as e:
             QMessageBox.critical(self, "Bağlantı Hatası", f"Giriş yapılırken bir hata oluştu: {e}")
             self._entry_password.clear()

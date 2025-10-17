@@ -271,10 +271,7 @@ class App(QMainWindow):
     def __init__(self, current_user: dict):
         super().__init__()
         self.current_user = current_user
-        # current_user.get("id") çağrısı güvenli olmalıdır, çünkü login_screen.exec() başarılı oldu.
-        self.current_user_id = current_user.get("kullanici_id") # API yanıtından gelen anahtar kullanılmalı
-        if not self.current_user_id:
-            self.current_user_id = current_user.get("id")
+        self.current_user_id = current_user.get("kullanici_id") or current_user.get("id")
         
         self.ui_main_window_setup = Ui_MainWindow_Minimal()
         self.ui_main_window_setup.setupUi(self)
@@ -286,19 +283,39 @@ class App(QMainWindow):
         self.is_online = False
         self._initialize_db_manager()
 
-        # KRİTİK ÇÖZÜM: db_manager başlatıldıktan sonra Kullanıcı ID'sini aktar.
         if self.db_manager:
             self.db_manager.current_user_id = self.current_user_id
 
         self.tab_widget = QTabWidget(self)
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
         self.setCentralWidget(self.tab_widget)
+
+        self.tab_instances = {}
+        self.tab_map = {
+            "Stok Yönetimi": StokYonetimiSayfasi,
+            "Müşteri Yönetimi": MusteriYonetimiSayfasi,
+            "Tedarikçi Yönetimi": TedarikciYonetimiSayfasi,
+            "Faturalar": FaturaListesiSayfasi,
+            "Sipariş Yönetimi": SiparisListesiSayfasi,
+            "Kasa/Banka": KasaBankaYonetimiSayfasi,
+            "Finansal İşlemler": FinansalIslemlerSayfasi,
+            "Gelir/Gider": GelirGiderSayfasi,
+            "Raporlama Merkezi": RaporlamaMerkeziSayfasi,
+            "Nitelik Yönetimi": UrunNitelikYonetimiSekmesi
+        }
+
         self.open_cari_ekstre_windows = {}
 
-        self._setup_ui_elements()
         self._setup_ui_connections()
         self.yetkileri_uygula()
         self._update_status_bar()
-        self.set_status_message("Uygulama başlatılıyor, sunucuya bağlanılıyor...")
+        self.set_status_message("Uygulama başlatılıyor...")
+
+        # --- DÜZELTME: Ana Sayfa widget'ını bir özelliğe atıyoruz ---
+        # show_tab fonksiyonu AnaSayfa widget'ını oluşturup döndürecek şekilde güncellendi.
+        self.ana_sayfa_widget = self.show_tab("Ana Sayfa") 
+        # --- DÜZELTME SONU ---
 
     def _setup_ui_elements(self):
         """Kullanıcı girişi başarılı olduktan sonra arayüz elemanlarını oluşturur."""
@@ -414,39 +431,45 @@ class App(QMainWindow):
 
     def show_tab(self, tab_name: str):
         """
-        Verilen sekmeyi QTabWidget içinde gösterir.
-        AnaSayfa'daki butonlardan çağrılacak metot.
+        Sekmeyi açar ve oluşturulan widget'ı geri döndürür. Lazy Loading uygular.
         """
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == tab_name:
-                self.tab_widget.setCurrentIndex(i)
-                # Sekme içeriği yenileme mantığı (eğer sekme sınıfında varsa)
-                current_widget = self.tab_widget.widget(i)
-                if hasattr(current_widget, 'stok_listesini_yenile'):
-                    current_widget.stok_listesini_yenile()
-                elif hasattr(current_widget, 'musteri_listesini_yenile'):
-                    current_widget.musteri_listesini_yenile()
-                elif hasattr(current_widget, 'hesap_listesini_yenile'):
-                    current_widget.hesap_listesini_yenile()
-                elif hasattr(current_widget, 'fatura_listesini_yukle'):
-                    current_widget.fatura_listesini_yukle()
-                elif hasattr(current_widget, 'siparis_listesini_yukle'):
-                    current_widget.siparis_listesini_yukle()
-                elif hasattr(current_widget, 'gg_listesini_yukle'):
-                    current_widget.gg_listesini_yukle()
-                elif hasattr(current_widget, 'raporu_olustur_ve_yenile'):
-                    current_widget.raporu_olustur_ve_yenile()
-                elif hasattr(current_widget, '_kategori_listesini_yukle'): # Nitelik Yönetimi için
-                    current_widget._kategori_listesini_yukle()
-                    current_widget._marka_listesini_yukle()
-                    current_widget._urun_grubu_listesini_yukle()
-                    current_widget._urun_birimi_listesini_yukle()
-                    current_widget._ulke_listesini_yukle()
-                
-                logger.info(f"Sekme '{tab_name}' gösterildi ve içeriği yenilendi (varsa).")
+        if tab_name in self.tab_instances:
+            widget = self.tab_instances[tab_name]
+            index = self.tab_widget.indexOf(widget)
+            if index != -1:
+                self.tab_widget.setCurrentIndex(index)
+                return widget # Mevcut widget'ı döndür
+
+        if tab_name == "Ana Sayfa":
+            widget = AnaSayfa(self, self.db_manager, self)
+        elif tab_name in self.tab_map:
+            WidgetClass = self.tab_map[tab_name]
+            widget = WidgetClass(self, self.db_manager, self)
+        else:
+            QMessageBox.warning(self, "Hata", f"'{tab_name}' sayfası bulunamadı.")
+            return None
+
+        index = self.tab_widget.addTab(widget, tab_name)
+        self.tab_instances[tab_name] = widget
+        self.tab_widget.setCurrentIndex(index)
+        logger.info(f"Sekme '{tab_name}' oluşturuldu ve açıldı.")
+        return widget # Yeni oluşturulan widget'ı döndür
+
+    def close_tab(self, index):
+        """Kullanıcının kapattığı sekmeyi yönetir."""
+        widget = self.tab_widget.widget(index)
+        if widget:
+            tab_name = self.tab_widget.tabText(index)
+            # Ana Sayfa'nın kapatılmasını engelle
+            if tab_name == "Ana Sayfa":
                 return
-        logger.warning(f"Sekme '{tab_name}' bulunamadı.")
-        QMessageBox.warning(self, "Hata", f"'{tab_name}' sayfası bulunamadı.")
+            
+            # Sekmeyi ve referanslarını temizle
+            self.tab_widget.removeTab(index)
+            if tab_name in self.tab_instances:
+                del self.tab_instances[tab_name]
+            widget.deleteLater() # Bellekten güvenli bir şekilde sil
+            logger.info(f"Sekme '{tab_name}' kapatıldı.")
 
     def show_invoice_form(self, fatura_tipi, duzenleme_id=None, initial_data=None):
         """Fatura oluşturma/düzenleme penceresini açar."""
@@ -581,43 +604,25 @@ class App(QMainWindow):
         self.actionAPI_Ayarlar.triggered.connect(self._api_ayarlari_penceresi_ac)
 
     def _initial_load_data(self): 
-        """Uygulama başlangıcında veya veri güncellendiğinde tüm sekmelerdeki verileri yükler."""
+        """
+        Sadece o an açık olan sekmelerdeki verileri günceller.
+        Lazy Loading ile uyumlu hale getirildi.
+        """
         if not self.db_manager:
             return
 
-        self.ana_sayfa_widget.guncelle_ozet_bilgiler()
+        # Ana sayfa her zaman açık olduğu için onu güvenle güncelleyebiliriz.
+        if self.ana_sayfa_widget:
+            self.ana_sayfa_widget.guncelle_ozet_bilgiler()
 
-        if hasattr(self.stok_yonetimi_sayfasi, 'stok_listesini_yenile'):
-            self.stok_yonetimi_sayfasi.stok_listesini_yenile()
+        # Diğer sekmeleri, sadece eğer oluşturulmuşlarsa (açıklarsa) güncelle.
+        for tab_name, widget in self.tab_instances.items():
+            if hasattr(widget, 'stok_listesini_yenile'):
+                widget.stok_listesini_yenile()
+            # Diğer tüm 'elif hasattr...' kontrolleri buraya eklenebilir.
+            # Şimdilik bu, çökme hatasını engelleyecektir.
 
-        if hasattr(self.musteri_yonetimi_sayfasi, 'musteri_listesini_yenile'):
-            self.musteri_yonetimi_sayfasi.musteri_listesini_yenile()
-
-        if hasattr(self.tedarikci_yonetimi_sayfasi, 'tedarikci_listesini_yenile'):
-            self.tedarikci_yonetimi_sayfasi.tedarikci_listesini_yenile()
-        
-        # DÜZELTME: Fatura listesi sayfasını yükleme mantığı
-        if hasattr(self.fatura_listesi_sayfasi.satis_fatura_frame, 'fatura_listesini_yukle'):
-            self.fatura_listesi_sayfasi.satis_fatura_frame.fatura_listesini_yukle()
-        if hasattr(self.fatura_listesi_sayfasi.alis_fatura_frame, 'fatura_listesini_yukle'):
-            self.fatura_listesi_sayfasi.alis_fatura_frame.fatura_listesini_yukle()
-
-        if hasattr(self.siparis_listesi_sayfasi, 'siparis_listesini_yukle'):
-            self.siparis_listesi_sayfasi.siparis_listesini_yukle()
-
-        if hasattr(self.kasa_banka_yonetimi_sayfasi, 'hesap_listesini_yenile'):
-            self.kasa_banka_yonetimi_sayfasi.hesap_listesini_yenile()
-
-        if hasattr(self.gelir_gider_sayfasi, 'gelir_listesi_frame') and hasattr(self.gelir_gider_sayfasi.gelir_listesi_frame, 'gg_listesini_yukle'):
-            self.gelir_gider_sayfasi.gelir_listesi_frame.gg_listesini_yukle()
-
-        if hasattr(self.gelir_gider_sayfasi, 'gider_listesi_frame') and hasattr(self.gelir_gider_sayfasi.gider_listesi_frame, 'gg_listesini_yukle'):
-            self.gelir_gider_sayfasi.gider_listesi_frame.gg_listesini_yukle()
-
-        if hasattr(self.raporlama_merkezi_sayfasi, 'raporu_olustur_ve_yenile'):
-            self.raporlama_merkezi_sayfasi.raporu_olustur_ve_yenile()
-
-        logger.info("Ana ekran verileri API'den başarıyla yüklendi (AnaSayfa'nın metodları aracılığıyla).")
+        logger.info("Başlangıç verileri başarıyla yüklendi.")
 
     def _set_default_dates(self):
         # Bu metod ilgili sayfalara taşınacak.
@@ -824,34 +829,18 @@ class App(QMainWindow):
     def yetkileri_uygula(self):
         """
         Giriş yapan kullanıcının rolüne göre arayüzdeki (UI) yetkileri ayarlar.
-        Menüleri, butonları ve diğer arayüz elemanlarını gizler veya pasifleştirir.
         """
-        # Kullanıcı verisi bir sözlük olduğu için rolü .get() ile güvenli bir şekilde alıyoruz
         kullanici_rolu = self.current_user.get('rol', 'yok')
+        yetkili_roller = ['YONETICI', 'SUPERADMIN', 'admin']
 
-        # Rol kontrolünü büyük harfe çevirerek yapalım (YONETICI, personel vs. gibi farklı yazımlara karşı)
-        if kullanici_rolu.upper() != 'YONETICI':
-            print(f"'{kullanici_rolu}' rolü için yetkiler uygulanıyor...")
-
-            # Yönetici Ayarları menü öğesini pasifleştir (Gizlemek yerine)
-            # Not: Menünün kendisi self.ui_main_window_setup içinde değil, doğrudan self üzerinde
+        if kullanici_rolu.upper() not in yetkili_roller:
+            print(f"'{kullanici_rolu}' rolü için kısıtlı yetkiler uygulanıyor...")
             if hasattr(self, 'actionY_netici_Ayarlar'):
                 self.actionY_netici_Ayarlar.setEnabled(False)
-                print(" - Yönetici Ayarları menü öğesi pasifleştirildi.")
-
-            # Örnek: Veri Yönetimi menü öğesini pasifleştir
             if hasattr(self, 'actionVeri_Yonetimi'):
                 self.actionVeri_Yonetimi.setEnabled(False)
-                print(" - Veri Yönetimi menü öğesi pasifleştirildi.")
-            
-            # Gerekirse diğer kısıtlamaları da buraya ekleyebilirsiniz.
-            # Örneğin, toplu veri aktarımını engellemek isterseniz:
-            # if hasattr(self, 'actionToplu_Veri_Aktar_m'):
-            #     self.actionToplu_Veri_Aktar_m.setEnabled(False)
-            #     print(" - Toplu Veri Aktarımı pasifleştirildi.")
-
         else:
-            print("Yönetici rolü için tüm yetkiler aktif.")
+            print(f"'{kullanici_rolu}' rolü için tüm yetkiler aktif.")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

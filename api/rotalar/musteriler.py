@@ -222,3 +222,26 @@ def get_next_musteri_kod(
         
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Sıradaki müşteri kodu alınırken hata: {str(e)}")
+    
+@router.get("/{musteri_id}/net_bakiye", response_model=modeller.NetBakiyeResponse)
+def get_musteri_net_bakiye(
+    musteri_id: int,
+    db: Session = Depends(veritabani.get_db),
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+):
+    """Belirtilen müşterinin net cari bakiyesini hesaplar ve döndürür."""
+    
+    musteri = db.query(modeller.Musteri).filter(modeller.Musteri.id == musteri_id).first()
+    if not musteri:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Müşteri bulunamadı")
+        
+    try:
+        cari_hizmeti = CariHesaplamaService(db)
+        net_bakiye = cari_hizmeti.calculate_cari_net_bakiye(musteri_id, modeller.CariTipiEnum.MUSTERI)
+        return {"net_bakiye": net_bakiye}
+    except Exception as e:
+        logger.error(f"Müşteri (ID: {musteri_id}) net bakiyesi hesaplanırken hata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Net bakiye hesaplanırken beklenmedik bir sunucu hatası oluştu."
+        )    

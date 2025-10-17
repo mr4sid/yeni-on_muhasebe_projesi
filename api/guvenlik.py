@@ -1,22 +1,23 @@
 # api/guvenlik.py dosyasının tam içeriği
-from datetime import datetime, timedelta
-from typing import Optional
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+from jose import jwt, JWTError
+from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
-from jose import JWTError, jwt
-from sqlalchemy.orm import Session, joinedload
-from . import modeller
-from .database_core import MasterSessionLocal
+from . import modeller, semalar
 from .config import settings
+from typing import Optional
+from .database_core import SessionLocal_master
 
 def get_master_db():
-    db = MasterSessionLocal()
+    db = SessionLocal_master()
     try:
         yield db
     finally:
         db.close()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/yonetici-giris")
 
 # Şifre karma oluşturma (hashing) bağlamı
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -68,12 +69,9 @@ def get_token_payload(token: str = Depends(oauth2_scheme)) -> dict:
     except JWTError:
         raise credentials_exception
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_master_db)
-):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_master_db)):
     """
-    Token'ı doğrular ve master veritabanından kullanıcıyı getirir.
+    Token'ı doğrular ve ana veritabanından (master) ilgili Kullanıcıyı döndürür.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -81,21 +79,18 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        # Ayarı merkezi 'settings' nesnesinden al
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        username: str = payload.get("sub")
+        if username is None:
             raise credentials_exception
-
-        user = db.query(modeller.Kullanici).filter(modeller.Kullanici.email == email).first()
-        if user is None:
-            raise credentials_exception
-
-        firma = user.firma
-        user_read = modeller.KullaniciRead.from_orm(user)
-        # İlişkili alanları manuel olarak ata
-        user_read.firma_adi = firma.unvan if firma else None
-        user_read.tenant_db_name = firma.db_adi if firma else None
-        return user_read
+        token_data = semalar.TokenData(username=username)
     except JWTError:
         raise credentials_exception
+
+    # DÜZELTME: 'Yonetici' modeli yerine doğru model olan 'Kullanici' modelini sorguluyoruz.
+    user = db.query(modeller.Kullanici).filter(modeller.Kullanici.email == token_data.username).first()
+    
+    if user is None:
+        raise credentials_exception
+        
+    return user

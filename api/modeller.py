@@ -9,6 +9,7 @@ from sqlalchemy import (
     Column, Integer, String, Float, Boolean, Text, DateTime, event,
     ForeignKey, Date, Enum, or_, and_, text, CheckConstraint, UniqueConstraint
 )
+from .database_core import Base
 from sqlalchemy.orm import relationship, declarative_base, foreign
 
 # --- ENUM TANIMLARI ---
@@ -51,6 +52,7 @@ class Firma(Base):
     id = Column(Integer, primary_key=True)
     unvan = Column(String(200), unique=True, nullable=False) # 'firma_adi' -> 'unvan' olarak değiştirildi
     db_adi = Column(String(200), unique=True, nullable=False) # 'tenant_db_name' -> 'db_adi' olarak değiştirildi
+    firma_no = Column(String(50), unique=True, nullable=False, index=True)
     kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id'))
     kullanicilar = relationship("Kullanici", back_populates="firma", foreign_keys="[Kullanici.firma_id]")
     kurucu_personel = relationship("Kullanici", back_populates="kurdugu_firma", foreign_keys=[kurucu_personel_id])

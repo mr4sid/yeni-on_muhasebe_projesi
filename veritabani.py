@@ -2180,6 +2180,49 @@ class OnMuhasebe:
             logging.error(f"Firma oluşturma API isteği sırasında hata: {e}")
             return False, f"API sunucusuna bağlanılamadı: {e}"
 
+    def personel_listesi_getir(self):
+        """Giriş yapmış yöneticinin personel listesini API'den alır."""
+        if not self.is_online or not self.access_token:
+            logger.warning("Personel listesi için çevrimiçi mod ve yetkilendirme gereklidir.")
+            return None, "Çevrimdışı veya yetkisiz."
+        try:
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            response = self.session.get(f"{self.api_base_url}/yonetici/personel-listesi", headers=headers)
+            response.raise_for_status()
+            return response.json(), None
+        except requests.exceptions.HTTPError as e:
+            error_message = f"API'den personel listesi alınamadı (HTTP {e.response.status_code}): {e.response.text}"
+            logger.error(error_message)
+            return None, error_message
+        except requests.exceptions.RequestException as e:
+            error_message = f"Personel listesi alınırken bağlantı hatası: {e}"
+            logger.error(error_message)
+            return None, error_message
+
+    def personel_olustur(self, kullanici_adi, sifre, rol="personel"):
+        """Yeni bir personel oluşturmak için API'ye istek gönderir."""
+        if not self.is_online or not self.access_token:
+            logger.warning("Personel oluşturmak için çevrimiçi mod ve yetkilendirme gereklidir.")
+            return None, "Çevrimdışı veya yetkisiz."
+        try:
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            payload = {
+                "kullanici_adi": kullanici_adi,
+                "sifre": sifre,
+                "rol": rol
+            }
+            response = self.session.post(f"{self.api_base_url}/yonetici/personel-olustur", json=payload, headers=headers)
+            response.raise_for_status()
+            return response.json(), None
+        except requests.exceptions.HTTPError as e:
+            error_message = f"Personel oluşturulamadı (HTTP {e.response.status_code}): {e.response.text}"
+            logger.error(error_message)
+            return None, error_message
+        except requests.exceptions.RequestException as e:
+            error_message = f"Personel oluşturulurken bağlantı hatası: {e}"
+            logger.error(error_message)
+            return None, error_message
+
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.
 def update_local_user_credentials(kullanici_id: int, email: str, sifre_hash: str, rol: str): 

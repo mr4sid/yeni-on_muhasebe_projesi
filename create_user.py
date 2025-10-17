@@ -27,7 +27,8 @@ def create_initial_user():
         "email": "admin@master.com",
         "telefon": "0000000000",
         "rol": "admin",
-        "firma_adi": "Master Yonetim Firmasi" # Bu alan en kritik olanı
+        "firma_adi": "Master Yonetim Firmasi",
+        "firma_no": "mv1000"
     }
 
     try:

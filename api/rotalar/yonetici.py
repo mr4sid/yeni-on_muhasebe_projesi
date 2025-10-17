@@ -4,14 +4,16 @@ import shutil
 import subprocess
 import logging
 from datetime import datetime
+from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional
+from ..guvenlik import get_password_hash, get_current_user
+from .. import modeller, guvenlik, semalar
+from ..veritabani import get_master_db, get_tenant_db, reset_db_connection, get_master_engine, create_tenant_db_and_tables, add_default_user_data, get_db
 
-from .. import modeller, guvenlik
-from ..veritabani import get_master_db, get_tenant_db, reset_db_connection, get_master_engine, create_tenant_db_and_tables, add_default_user_data
 
 # 1. GÜNCELLEME: Rota adresi "/yonetici" olarak düzeltildi.
 router = APIRouter(
@@ -255,3 +257,52 @@ def initial_data_setup_endpoint(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Varsayılan veri oluşturma hatası: {e}")
+
+@router.post("/personel-olustur", response_model=semalar.Personel, status_code=status.HTTP_201_CREATED)
+def personel_olustur(personel: semalar.PersonelOlustur, db: Session = Depends(get_db), current_user: modeller.Kullanici = Depends(get_current_user)):
+    """
+    Sadece YONETICI rolüne sahip kullanıcının kendi firmasına yeni bir personel eklemesini sağlar.
+    """
+    db_master = next(get_master_db()) # Master DB'ye erişim
+    try:
+        yonetici = db_master.query(modeller.Yonetici).filter(modeller.Yonetici.id == current_user.id).first()
+        if not yonetici:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Yönetici bulunamadı.")
+        
+        # Kendi firmasının veritabanında aynı kullanıcı adında başka bir personel var mı kontrol et
+        db_kullanici = db.query(modeller.Kullanici).filter(modeller.Kullanici.kullanici_adi == personel.kullanici_adi).first()
+        if db_kullanici:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Bu kullanıcı adı zaten kullanılıyor.")
+
+        hashed_sifre = get_password_hash(personel.sifre)
+        
+        yeni_personel = modeller.Kullanici(
+            kullanici_adi=personel.kullanici_adi,
+            sifre_hash=hashed_sifre,
+            rol=personel.rol,
+            firma_id=yonetici.firma_id
+        )
+        db.add(yeni_personel)
+        db.commit()
+        db.refresh(yeni_personel)
+
+        return yeni_personel
+    finally:
+        db_master.close()
+
+@router.get("/personel-listesi", response_model=List[semalar.Personel])
+def personel_listesi(db: Session = Depends(get_db), current_user: modeller.Kullanici = Depends(get_current_user)):
+    """
+    Giriş yapmış yöneticinin kendi firmasına ait tüm personelleri listeler.
+    """
+    db_master = next(get_master_db()) # Master DB'ye erişim
+    try:
+        yonetici = db_master.query(modeller.Yonetici).filter(modeller.Yonetici.id == current_user.id).first()
+        if not yonetici:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Yönetici bulunamadı.")
+            
+        personeller = db.query(modeller.Kullanici).filter(modeller.Kullanici.firma_id == yonetici.firma_id).all()
+        return personeller
+    finally:
+        db_master.close()

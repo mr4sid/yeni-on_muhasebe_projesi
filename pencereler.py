@@ -11,12 +11,12 @@ import locale
 import requests
 import shutil
 import traceback
-from PySide6.QtWidgets import (
+from PySide6.QtWidgets import (QTableWidget, QTableWidgetItem, QFormLayout,
     QApplication, QMessageBox, QFileDialog,
     QWidget, QDialog, QPushButton, QVBoxLayout,
     QHBoxLayout, QGridLayout, QLabel, QLineEdit, QComboBox,
     QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHeaderView, QTextEdit,
-    QCheckBox, QFrame, QGroupBox,
+    QCheckBox, QFrame, QGroupBox, QDialogButtonBox,
     QMenu, QTabWidget,QSizePolicy, QProgressBar)
 from PySide6.QtGui import QFont, QPixmap, QDoubleValidator, QBrush, QColor
 from PySide6.QtCore import Qt, QTimer, Signal, QLocale, Slot, QThread, QObject
@@ -2256,7 +2256,7 @@ class SiparisDetayPenceresi(QDialog):
 class YoneticiAyarlariPenceresi(QDialog):
     def __init__(self, parent=None, db_manager=None):
         super().__init__(parent)
-        self.db = db_manager
+        self.db = db_manager # Değişken adını koruyoruz
         self.setWindowTitle("Yönetici Ayarları - Firma Bilgileri")
         self.setMinimumWidth(500)
 
@@ -2267,7 +2267,6 @@ class YoneticiAyarlariPenceresi(QDialog):
         self.unvan_entry = QLineEdit()
         self.layout.addWidget(self.unvan_entry, 1, 1)
         
-        # Diğer firma bilgileri için alanlar
         self.layout.addWidget(QLabel("Vergi Dairesi:"), 2, 0)
         self.vergi_dairesi_entry = QLineEdit()
         self.layout.addWidget(self.vergi_dairesi_entry, 2, 1)
@@ -2280,13 +2279,28 @@ class YoneticiAyarlariPenceresi(QDialog):
         self.adres_entry = QLineEdit()
         self.layout.addWidget(self.adres_entry, 4, 1)
 
-        # ... (Gelecekte eklenebilecek diğer alanlar) ...
+        # --- YENİ EKLENEN BÖLÜM ---
+        # Araya yeni bir ayırıcı ve buton ekliyoruz.
+        self.layout.addWidget(QLabel("<hr>"), 5, 0, 1, 2) # Yatay çizgi ile ayırıcı
+        
+        self.personel_yonetimi_button = QPushButton("Personel Yönetimi")
+        self.personel_yonetimi_button.clicked.connect(self._personel_yonetimi_ac)
+        # Yeni butonu 6. satıra ekliyoruz.
+        self.layout.addWidget(self.personel_yonetimi_button, 6, 0, 1, 2)
+        # --- YENİ BÖLÜM SONU ---
 
         self.kaydet_button = QPushButton("Bilgileri Kaydet")
         self.kaydet_button.clicked.connect(self.bilgileri_kaydet)
-        self.layout.addWidget(self.kaydet_button, 5, 0, 1, 2)
+        # Mevcut kaydet butonunu bir alt satıra (7. satır) taşıyoruz.
+        self.layout.addWidget(self.kaydet_button, 7, 0, 1, 2)
 
         self._mevcut_bilgileri_yukle()
+
+    def _personel_yonetimi_ac(self):
+        """Personel Yönetimi penceresini açar."""
+        # db_manager'ı (self.db) yeni pencereye iletiyoruz.
+        dialog = PersonelYonetimiPenceresi(self, self.db)
+        dialog.exec()
 
     def _mevcut_bilgileri_yukle(self):
         """Mevcut firma bilgilerini API'den çeker ve form alanlarını doldurur."""
@@ -6874,3 +6888,83 @@ class KullaniciKayitPenceresi(QDialog):
             QMessageBox.critical(self, "Kayıt Hatası", f"Kullanıcı oluşturulurken bir hata oluştu:\n{error_detail}")
         except Exception as e:
             QMessageBox.critical(self, "Beklenmeyen Hata", f"Beklenmeyen bir hata oluştu: {e}")
+
+class PersonelYonetimiPenceresi(QDialog):
+    def __init__(self, parent, db_manager):
+        super().__init__(parent)
+        self.db_manager = db_manager
+        self.setWindowTitle("Personel Yönetimi")
+        self.setMinimumSize(600, 400)
+
+        self.layout = QVBoxLayout(self)
+
+        # Personel Listesi Tablosu
+        self.table_widget = QTableWidget()
+        self.table_widget.setColumnCount(3)
+        self.table_widget.setHorizontalHeaderLabels(["ID", "Kullanıcı Adı", "Rol"])
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers) # Düzenlemeyi kapat
+
+        # Butonlar
+        self.btn_yeni_personel = QPushButton("Yeni Personel Ekle")
+        self.btn_yenile = QPushButton("Listeyi Yenile")
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.btn_yenile)
+        button_layout.addStretch()
+        button_layout.addWidget(self.btn_yeni_personel)
+
+        self.layout.addWidget(self.table_widget)
+        self.layout.addLayout(button_layout)
+
+        # Sinyaller
+        self.btn_yeni_personel.clicked.connect(self._yeni_personel_ekle_dialog)
+        self.btn_yenile.clicked.connect(self.personel_listesini_yukle)
+
+        # Başlangıçta listeyi yükle
+        self.personel_listesini_yukle()
+
+    def personel_listesini_yukle(self):
+        self.table_widget.setRowCount(0) # Tabloyu temizle
+        personeller, hata = self.db_manager.personel_listesi_getir()
+        if hata:
+            QMessageBox.critical(self, "Hata", f"Personel listesi alınamadı:\n{hata}")
+            return
+        
+        if personeller:
+            self.table_widget.setRowCount(len(personeller))
+            for row, personel in enumerate(personeller):
+                self.table_widget.setItem(row, 0, QTableWidgetItem(str(personel['id'])))
+                self.table_widget.setItem(row, 1, QTableWidgetItem(personel['kullanici_adi']))
+                self.table_widget.setItem(row, 2, QTableWidgetItem(personel['rol']))
+
+    def _yeni_personel_ekle_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Yeni Personel Oluştur")
+        form_layout = QFormLayout(dialog)
+
+        kullanici_adi_input = QLineEdit(dialog)
+        sifre_input = QLineEdit(dialog)
+        sifre_input.setEchoMode(QLineEdit.Password)
+        
+        form_layout.addRow("Kullanıcı Adı:", kullanici_adi_input)
+        form_layout.addRow("Şifre:", sifre_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
+        form_layout.addRow(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec() == QDialog.Accepted:
+            kullanici_adi = kullanici_adi_input.text()
+            sifre = sifre_input.text()
+            if not kullanici_adi or not sifre:
+                QMessageBox.warning(self, "Eksik Bilgi", "Kullanıcı adı ve şifre boş bırakılamaz.")
+                return
+
+            yeni_personel, hata = self.db_manager.personel_olustur(kullanici_adi, sifre)
+            if hata:
+                QMessageBox.critical(self, "Hata", f"Personel oluşturulamadı:\n{hata}")
+            else:
+                QMessageBox.information(self, "Başarılı", f"Personel '{yeni_personel['kullanici_adi']}' başarıyla oluşturuldu.")
+                self.personel_listesini_yukle() # Listeyi yenile

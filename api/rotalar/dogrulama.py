@@ -5,8 +5,8 @@ from datetime import timedelta
 from sqlalchemy.exc import IntegrityError
 import logging
 
-from .. import modeller 
-from ..veritabani import get_master_db, get_tenant_engine, get_master_engine
+from .. import modeller, semalar
+from ..veritabani import get_master_db, get_tenant_engine, get_master_engine, get_tenant_session_by_name
 from ..guvenlik import create_access_token, verify_password, get_password_hash
 from ..config import settings
 from sqlalchemy import text 
@@ -225,3 +225,49 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Kullanıcı kaydı oluşturulamadı: {e}"
         )
+    
+@router.post("/personel-giris", response_model=semalar.Token)
+def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Session = Depends(get_master_db)):
+    # 1. Adım: Firma numarasını kullanarak ana veritabanından firmayı bul.
+    firma = db_public.query(modeller.Firma).filter(modeller.Firma.firma_no == personel_bilgileri.firma_no).first()
+
+    if not firma:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bu firma numarasına sahip bir firma bulunamadı."
+        )
+
+    # 2. Adım: Firmanın kendine özel veritabanına (tenant) bağlan.
+    db_tenant = get_tenant_session_by_name(firma.db_adi)
+
+    try:
+        # 3. Adım: Firma veritabanında kullanıcı adını ara.
+        kullanici = db_tenant.query(modeller.Kullanici).filter(modeller.Kullanici.kullanici_adi == personel_bilgileri.kullanici_adi).first()
+
+        # 4. Adım: Kullanıcıyı ve şifreyi doğrula.
+        if not kullanici or not verify_password(personel_bilgileri.sifre, kullanici.sifre_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Kullanıcı adı veya şifre yanlış.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # 5. Adım: Başarılı giriş sonrası token oluştur.
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": kullanici.kullanici_adi, "rol": kullanici.rol, "id": kullanici.id, "firma_db": firma.db_adi},
+            expires_delta=access_token_expires
+        )
+        
+        # Arayüzün ihtiyaç duyacağı temel bilgileri de token ile birlikte geri döndürüyoruz.
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "kullanici_id": kullanici.id,
+            "kullanici_adi": kullanici.kullanici_adi,
+            "rol": kullanici.rol,
+            "sifre_hash": kullanici.sifre_hash
+        }
+    finally:
+        # Oturumu kapatarak kaynakların serbest bırakıldığından emin oluyoruz.
+        db_tenant.close()

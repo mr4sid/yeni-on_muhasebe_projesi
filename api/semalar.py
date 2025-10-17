@@ -9,7 +9,7 @@ from datetime import datetime, date
 import enum
 from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
-from .veritabani import Base
+from .database_core import Base
 
 # Enum tanımları
 class FaturaTuruEnum(str, enum.Enum):
@@ -519,3 +519,33 @@ class GiderSiniflandirma(Base):
     ad = Column(String, unique=True, index=True)
     kullanici_id = Column(Integer, ForeignKey('kullanicilar.id'), nullable=True)
     gider_giderler = relationship("GelirGider", back_populates="gider_siniflandirma")
+
+class PersonelGirisSema(BaseModel):
+    firma_no: str
+    kullanici_adi: str
+    sifre: str    
+
+class PersonelBase(BaseModel):
+    kullanici_adi: str
+    rol: str = "personel" # Varsayılan rol personel olsun
+
+class PersonelOlustur(PersonelBase):
+    sifre: str
+
+class Personel(PersonelBase):
+    id: int
+    aktif: bool
+
+    class Config:
+        from_attributes = True # SQLAlchemy modelinden Pydantic modeline otomatik dönüşüm için    
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    kullanici_id: int
+    kullanici_adi: str
+    rol: str
+    sifre_hash: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None        
