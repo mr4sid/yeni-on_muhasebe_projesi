@@ -122,12 +122,14 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
                 detail=f"Giriş sırasında firma veritabanı oluşturulamadı."
             )
 
-    # KRİTİK DÜZELTME: Ayar artık merkezi 'settings' nesnesinden okunuyor.
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "tenant_db": tenant_db_name}, 
+        data={"sub": user.email, "tenant_db": tenant_db_name, "rol": user.rol}, 
         expires_delta=access_token_expires
     )
+
+    # YENİ EKLENEN KISIM: ad ve soyad birleştiriliyor.
+    ad_soyad = f"{user.ad} {user.soyad}".strip()
 
     return {
         "access_token": access_token, 
@@ -137,7 +139,8 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
         "sifre_hash": user.sifre_hash,
         "rol": user.rol,
         "firma_adi": firma_adi,
-        "tenant_db_name": tenant_db_name
+        "tenant_db_name": tenant_db_name,
+        "ad_soyad": ad_soyad  # YENİ EKLENDİ
     }
 
 @router.post("/register", response_model=modeller.KullaniciRead)

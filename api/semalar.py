@@ -542,6 +542,7 @@ class Personel(PersonelBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    ad_soyad: str
     kullanici_id: int
     kullanici_adi: str
     rol: str
@@ -549,3 +550,20 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None        
+
+class EnCokSatanUrun(BaseModel):
+    urun_adi: str
+    toplam_miktar: float
+
+class DashboardOzet(BaseModel):
+    aylik_satislar: float
+    aylik_alislar: float
+    toplam_tahsilatlar: float
+    toplam_odemeler: float
+    kritik_stok_sayisi: int
+    en_cok_satan_urunler: List[EnCokSatanUrun]
+    vadesi_yaklasan_alacaklar_toplami: float
+    vadesi_gecmis_borclar_toplami: float
+
+    class Config:
+        orm_mode = True    

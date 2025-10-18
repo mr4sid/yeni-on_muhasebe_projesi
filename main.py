@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QFileDialog,
     QWidget, QMenuBar, QStatusBar, QTabWidget,QDialog, QVBoxLayout
 )
+from PyQt5.QtWidgets import QFileDialog
 from PySide6.QtGui import QAction,QPalette, QColor, QIcon
 from PySide6.QtCore import Qt, QDate, Signal, QTimer, QThread, QObject, Slot
 import multiprocessing
@@ -624,10 +625,6 @@ class App(QMainWindow):
 
         logger.info("Başlangıç verileri başarıyla yüklendi.")
 
-    def _set_default_dates(self):
-        # Bu metod ilgili sayfalara taşınacak.
-        pass
-
     def _musteri_karti_penceresi_ac(self):
         from pencereler import YeniMusteriEklePenceresi
         self.musteri_karti_penceresi = YeniMusteriEklePenceresi(self, self.db_manager, self.musteri_yonetimi_sayfasi.musteri_listesini_yenile, app_ref=self)
@@ -698,37 +695,74 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Rapor Hatası", f"{rapor_tipi.capitalize()} raporu oluşturulurken beklenmeyen bir hata oluştu: {e}")
             logger.error(f"{rapor_tipi.capitalize()} raporu oluşturulurken hata: {e}")
 
-    def _yedekle(self, file_path):
-        """Veritabanını yedekler ve kullanıcıya geri bildirimde bulunur."""
-        self.set_status_message("Veritabanı yedekleniyor, lütfen bekleyiniz...", "blue")
-        try:
-            # db sınıfındaki merkezi metodu kullanıyoruz.
-            success, message, created_file_path = self.db.database_backup(file_path=file_path, kullanici_id=self.current_user_id)
-            if success:
-                self.set_status_message(message, "green")
-                QMessageBox.information(self, "Başarılı", f"{message}\nDosya Yolu: {created_file_path}")
-            else:
-                self.set_status_message(message, "red")
-                QMessageBox.critical(self, "Yedekleme Hatası", message)
-        except Exception as e:
-            self.set_status_message(f"Yedekleme sırasında bir hata oluştu: {e}", "red")
-            QMessageBox.critical(self, "Yedekleme Hatası", f"Beklenmeyen bir hata oluştu:\n{e}")
+    def _yedekle(self):
+        """Veritabanını yedeklemek için asenkron bir worker başlatır."""
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        dosya_yolu, _ = QFileDialog.getSaveFileName(
+            self,
+            "Yedekleme Dosyasını Kaydet",
+            "",
+            "SQL Dosyaları (*.sql);;Tüm Dosyalar (*)",
+            options=options,
+        )
 
-    def _check_backup_completion(self, result_queue, bekleme_penceresi):
-        if not result_queue.empty():
-            self.backup_timer.stop()
-            bekleme_penceresi.kapat()
-            
-            success, message, created_file_path = result_queue.get()
-            
-            if success and created_file_path and os.path.exists(created_file_path) and os.path.getsize(created_file_path) > 0:
-                final_message = f"Yedekleme başarıyla tamamlandı. Dosya: {created_file_path}"
-                QMessageBox.information(self, "Yedekleme", final_message)
-                self.set_status_message(final_message, "green")
-            else:
-                final_message = f"Yedekleme işlemi tamamlanamadı veya dosya oluşturulamadı: {message}"
-                QMessageBox.critical(self, "Yedekleme Hatası", final_message)
-                self.set_status_message(final_message, "red")
+        if dosya_yolu:
+            self.statusBar().showMessage("Yedekleme işlemi başlatıldı...")
+            # Dosya uzantısını kontrol et ve gerekirse ekle
+            if not dosya_yolu.endswith(".sql"):
+                dosya_yolu += ".sql"
+
+            self.backup_worker = BackupWorker(
+                self.api_client, "yedekle", dosya_yolu=dosya_yolu
+            )
+            self.backup_worker.signals.finished.connect(self._on_backup_finished)
+            self.backup_worker.signals.error.connect(self._on_backup_error)
+            self.backup_worker.start()
+
+    def _geri_yukle(self):
+        """Veritabanını bir yedekten geri yüklemek için asenkron bir worker başlatır."""
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        dosya_yolu, _ = QFileDialog.getOpenFileName(
+            self,
+            "Geri Yüklenecek Dosyayı Seç",
+            "",
+            "SQL Dosyaları (*.sql);;Tüm Dosyalar (*)",
+            options=options,
+        )
+
+        if dosya_yolu:
+            confirm = QMessageBox.question(
+                self,
+                "Onay",
+                "Geri yükleme işlemi mevcut verilerinizin üzerine yazacaktır. Emin misiniz?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if confirm == QMessageBox.Yes:
+                self.statusBar().showMessage("Geri yükleme işlemi başlatıldı...")
+                self.backup_worker = BackupWorker(
+                    self.api_client, "geri_yukle", dosya_yolu=dosya_yolu
+                )
+                self.backup_worker.signals.finished.connect(self._on_restore_finished)
+                self.backup_worker.signals.error.connect(self._on_backup_error)
+                self.backup_worker.start()
+
+#    def _check_backup_completion(self, result_queue, bekleme_penceresi):
+#        if not result_queue.empty():
+#            self.backup_timer.stop()
+#            bekleme_penceresi.kapat()
+#            
+#            success, message, created_file_path = result_queue.get()
+#            
+#            if success and created_file_path and os.path.exists(created_file_path) and os.path.getsize(created_file_path) > 0:
+#                final_message = f"Yedekleme başarıyla tamamlandı. Dosya: {created_file_path}"
+#                QMessageBox.information(self, "Yedekleme", final_message)
+#                self.set_status_message(final_message, "green")
+#            else:
+#                final_message = f"Yedekleme işlemi tamamlanamadı veya dosya oluşturulamadı: {message}"
+#                QMessageBox.critical(self, "Yedekleme Hatası", final_message)
+#                self.set_status_message(final_message, "red")
 
     def _handle_backup_completion(self, success, message, created_file_path):
         """Yedekleme tamamlandığında sinyal tarafından çağrılan metot."""
@@ -744,23 +778,6 @@ class App(QMainWindow):
             final_message = f"Yedekleme işlemi tamamlanamadı veya dosya oluşturulamadı: {message}"
             QMessageBox.critical(self, "Yedekleme Hatası", final_message)
             self.set_status_message(final_message, "red")
-
-    def _geri_yukle(self, file_path):
-        """Veritabanını geri yükler ve uygulamayı yeniden başlatır."""
-        self.set_status_message("Veritabanı geri yükleniyor, lütfen bekleyiniz...", "blue")
-        try:
-            # db sınıfındaki merkezi metodu kullanıyoruz.
-            success, message, _ = self.db.database_restore(file_path=file_path, kullanici_id=self.current_user_id)
-            if success:
-                self.set_status_message(message, "green")
-                QMessageBox.information(self, "Başarılı", f"{message}\nUygulama yeniden başlatılacak.")
-                self.quit()
-            else:
-                self.set_status_message(message, "red")
-                QMessageBox.critical(self, "Geri Yükleme Hatası", message)
-        except Exception as e:
-            self.set_status_message(f"Geri yükleme sırasında bir hata oluştu: {e}", "red")
-            QMessageBox.critical(self, "Geri Yükleme Hatası", f"Beklenmeyen bir hata oluştu:\n{e}")
 
     @Slot(bool, str)
     def _handle_restore_completion(self, success, message):
@@ -779,9 +796,9 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Geri Yükleme Hatası", final_message)
             self.set_status_message(final_message, "red")
 
-    def _pdf_olusturma_islemi(self, data, filename="rapor.pdf"):
-        logger.info(f"PDF oluşturma işlemi çağrıldı. Veri boyutu: {len(data)} - Dosya Adı: {filename}")
-        QMessageBox.information(self, "PDF Oluşturma", "PDF oluşturma işlevi entegrasyonu tamamlanmadı. Lütfen raporlama modülünü kontrol edin.")
+#    def _pdf_olusturma_islemi(self, data, filename="rapor.pdf"):
+#        logger.info(f"PDF oluşturma işlemi çağrıldı. Veri boyutu: {len(data)} - Dosya Adı: {filename}")
+#        QMessageBox.information(self, "PDF Oluşturma", "PDF oluşturma işlevi entegrasyonu tamamlanmadı. Lütfen raporlama modülünü kontrol edin.")
 
     def _update_status_bar(self):
         self.statusBar().showMessage("Uygulama hazır.")

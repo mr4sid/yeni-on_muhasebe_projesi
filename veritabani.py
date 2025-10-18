@@ -1482,32 +1482,32 @@ class OnMuhasebe:
                 self.is_online = False
         return 0.0
 
-    def get_total_collections(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
-        if self.is_online:
-            try:
-                summary = self._make_api_request(
-                    "GET",
-                    "/raporlar/dashboard_ozet",
-                    params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi}
-                )
-                if summary is not None:
-                    return summary.get("toplam_tahsilatlar", 0.0)
-            except Exception as e:
-                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
-                self.is_online = False
-        return 0.0
+#    def get_total_collections(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
+#        if self.is_online:
+#            try:
+#                summary = self._make_api_request(
+#                    "GET",
+#                    "/raporlar/dashboard_ozet",
+#                    params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi}
+#                )
+#                if summary is not None:
+#                    return summary.get("toplam_tahsilatlar", 0.0)
+#            except Exception as e:
+#                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
+#                self.is_online = False
+#        return 0.0
 
-    def get_total_payments(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
-        """Toplam ödemeleri çeker. (kullanici_id kaldırıldı)"""
-        if self.is_online:
-            try:
-                summary = self._make_api_request("GET", "/raporlar/dashboard_ozet", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
-                if summary is not None:
-                    return summary.get("toplam_odemeler", 0.0)
-            except Exception as e:
-                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
-                self.is_online = False
-        return 0.0
+#    def get_total_payments(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
+#        """Toplam ödemeleri çeker. (kullanici_id kaldırıldı)"""
+#        if self.is_online:
+#            try:
+#                summary = self._make_api_request("GET", "/raporlar/dashboard_ozet", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
+#                if summary is not None:
+#                    return summary.get("toplam_odemeler", 0.0)
+#            except Exception as e:
+#                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
+#                self.is_online = False
+#        return 0.0
 
     def get_satislar_detayli_rapor(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str, cari_id: int = None):
         params = {"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi, "cari_id": cari_id, "kullanici_id": kullanici_id}
@@ -1550,22 +1550,22 @@ class OnMuhasebe:
             "net_kar": 0.0
         }
                 
-    def get_monthly_sales_summary(self, baslangic_tarihi: str, bitis_tarihi: str):
-        """Aylık satış özetini çeker. (kullanici_id kaldırıldı)"""
-        if self.is_online:
-            try:
-                # DÜZELTME: kullanici_id imzadan ve params'tan kaldırıldı.
-                response = self._make_api_request("GET", "/raporlar/kar_zarar_verileri", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
-                if response is not None:
-                    # NOT: Bu metot artık kar/zarar verilerini döndürüyor.
-                    # Eğer arayüzde aylık satış listesi bekleniyorsa bu metotun API'de düzeltilmesi gerekir.
-                    return response
-            except Exception as e:
-                # DÜZELTME: self.app bağımlılığı kaldırıldı.
-                logger.error(f"Aylık satış özeti API'den çekilirken hata: {e}", exc_info=True)
-                self.is_online = False
-        
-        return {"items": [], "total": 0}
+#    def get_monthly_sales_summary(self, baslangic_tarihi: str, bitis_tarihi: str):
+#        """Aylık satış özetini çeker. (kullanici_id kaldırıldı)"""
+#        if self.is_online:
+#            try:
+#                # DÜZELTME: kullanici_id imzadan ve params'tan kaldırıldı.
+#                response = self._make_api_request("GET", "/raporlar/kar_zarar_verileri", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
+#                if response is not None:
+#                    # NOT: Bu metot artık kar/zarar verilerini döndürüyor.
+#                    # Eğer arayüzde aylık satış listesi bekleniyorsa bu metotun API'de düzeltilmesi gerekir.
+#                    return response
+#            except Exception as e:
+#                # DÜZELTME: self.app bağımlılığı kaldırıldı.
+#                logger.error(f"Aylık satış özeti API'den çekilirken hata: {e}", exc_info=True)
+#                self.is_online = False
+#        
+#        return {"items": [], "total": 0}
 
     def get_monthly_income_expense_summary(self, baslangic_tarihi: str, bitis_tarihi: str):
         """Aylık gelir/gider özetini çeker. (kullanici_id kaldırıldı)"""
@@ -1625,15 +1625,15 @@ class OnMuhasebe:
             logger.error(f"Tüm kasa/banka bakiyeleri çekilirken hata: {e}")
             return []
 
-    def get_monthly_cash_flow_summary(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
-        """Nakit akışı raporu için aylık nakit akışı özetini çeker."""
-        try:
-            yil = int(baslangic_tarihi.split('-')[0])
-            response = self._make_api_request("GET", "/raporlar/gelir_gider_aylik_ozet", params={"yil": yil, "kullanici_id": kullanici_id})
-            return response.get("aylik_ozet", [])
-        except Exception as e:
-            logger.error(f"Aylık nakit akışı özeti çekilirken hata: {e}")
-            return []
+#    def get_monthly_cash_flow_summary(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
+#        """Nakit akışı raporu için aylık nakit akışı özetini çeker."""
+#        try:
+#            yil = int(baslangic_tarihi.split('-')[0])
+#            response = self._make_api_request("GET", "/raporlar/gelir_gider_aylik_ozet", params={"yil": yil, "kullanici_id": kullanici_id})
+#            return response.get("aylik_ozet", [])
+#        except Exception as e:
+#            logger.error(f"Aylık nakit akışı özeti çekilirken hata: {e}")
+#            return []
 
     def get_cari_yaslandirma_verileri(self, tarih: str = None):
         params = {"tarih": tarih} if tarih else {}
@@ -1644,9 +1644,9 @@ class OnMuhasebe:
             logger.error(f"Cari yaşlandırma verileri çekilirken hata: {e}")
             return {"musteri_alacaklar": [], "tedarikci_borclar": []}
 
-    def get_stock_value_by_category(self, kullanici_id: int):
-        logger.warning(f"get_stock_value_by_category metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
-        return {"items": [], "total": 0}
+#    def get_stock_value_by_category(self, kullanici_id: int):
+#        logger.warning(f"get_stock_value_by_category metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
+#        return {"items": [], "total": 0}
 
     def get_critical_stock_items(self):
         if self.is_online:
@@ -1659,9 +1659,9 @@ class OnMuhasebe:
                 self.is_online = False
         return []
             
-    def get_sales_by_payment_type(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
-        logger.warning(f"get_sales_by_payment_type metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
-        return []
+#    def get_sales_by_payment_type(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
+#        logger.warning(f"get_sales_by_payment_type metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
+#        return []
 
     def get_top_selling_products(self, baslangic_tarihi: str, bitis_tarihi: str, limit: int = 5):
         """En çok satan ürünleri çeker. (kullanici_id kaldırıldı)"""

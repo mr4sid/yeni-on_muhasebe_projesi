@@ -9,6 +9,8 @@ from sqlalchemy import (
     Column, Integer, String, Float, Boolean, Text, DateTime, event,
     ForeignKey, Date, Enum, or_, and_, text, CheckConstraint, UniqueConstraint
 )
+from pydantic import field_validator
+import re
 from .database_core import Base
 from sqlalchemy.orm import relationship, declarative_base, foreign
 
@@ -1305,12 +1307,19 @@ class NextCodeResponse(BaseModel):
     next_code: str
     model_config = ConfigDict(from_attributes=True)    
 
-class OfflineLoginResponse(Token):
+class OfflineLoginResponse(BaseModel):
+    access_token: str
+    token_type: str
     kullanici_id: int
-    email: EmailStr
-    rol: str
-    tenant_db_name: str
+    email: str
     sifre_hash: str
+    rol: str
+    firma_adi: str
+    tenant_db_name: str
+    ad_soyad: str
+
+    class Config:
+        from_attributes = True
 
 # --- RAPOR MODELLERİ SONU ---
 
@@ -1334,4 +1343,38 @@ class FirmaOlustur(BaseModel):
     yonetici_ad_soyad: str
     yonetici_email: EmailStr
     yonetici_telefon: str
-    yonetici_sifre: str    
+    yonetici_sifre: str
+    
+    @field_validator('yonetici_telefon')
+    @classmethod
+    def validate_telefon(cls, v):
+        """Telefon numarasını doğrular ve temizler."""
+        if not v:
+            raise ValueError('Telefon numarası boş olamaz')
+        
+        # Sadece rakam ve + işareti tut
+        telefon_temiz = re.sub(r'[^\d+]', '', v)
+        
+        # Minimum 10 haneli olmalı
+        if len(telefon_temiz) < 10:
+            raise ValueError('Telefon numarası en az 10 haneli olmalıdır')
+        
+        return telefon_temiz
+    
+    @field_validator('yonetici_ad_soyad')
+    @classmethod
+    def validate_ad_soyad(cls, v):
+        """Ad soyad alanını doğrular."""
+        if not v or not v.strip():
+            raise ValueError('Yönetici adı soyadı boş olamaz')
+        
+        # Fazla boşlukları temizle
+        return " ".join(v.strip().split())
+    
+    @field_validator('yonetici_sifre')
+    @classmethod
+    def validate_sifre(cls, v):
+        """Şifre güvenlik kontrolü."""
+        if len(v) < 6:
+            raise ValueError('Şifre en az 6 karakter olmalıdır')
+        return v

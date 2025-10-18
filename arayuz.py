@@ -166,10 +166,6 @@ class AnaSayfa(QWidget):
             button.clicked.connect(action)
             self.hizli_menuler_layout.addWidget(button, position[0], position[1])
 
-        # --- GRAFİK VE İLGİLİ METOTLAR TAMAMEN KALDIRILDI ---
-
-        self.guncelle_ozet_bilgiler()
-
     def closeEvent(self, event):
         """
         Pencere kapatılmaya çalışıldığında bu fonksiyon otomatik olarak çağrılır.
@@ -215,85 +211,97 @@ class AnaSayfa(QWidget):
         self.sirket_adi_label.setText(f"Hoş Geldiniz, {sirket_adi}")
 
     def guncelle_ozet_bilgiler(self):
+        """Dashboard özet bilgilerini API'den alıp arayüzde gösterir."""
         try:
-            baslangic_tarihi = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-            bitis_tarihi = datetime.now().strftime('%Y-%m-%d')
-            
-            ozet_data, error = self.db.get_dashboard_summary(
-                baslangic_tarihi=baslangic_tarihi,
-                bitis_tarihi=bitis_tarihi
-            )
-            
-            if error:
-                print(f"Dashboard özeti yüklenemedi: {error}")
-                return
-
-            if ozet_data:
-                self.lbl_toplam_satis_degeri.setText(self.db._format_currency(ozet_data.get('toplam_satislar', 0.0)))
-                self.lbl_toplam_alis_degeri.setText(self.db._format_currency(ozet_data.get('toplam_alislar', 0.0)))
-                self.lbl_toplam_tahsilat_degeri.setText(self.db._format_currency(ozet_data.get('toplam_tahsilatlar', 0.0)))
-                self.lbl_toplam_odeme_degeri.setText(self.db._format_currency(ozet_data.get('toplam_odemeler', 0.0)))
-
-        except Exception as e:
-            # QMessageBox.critical(self.app, "API Hatası", f"Dashboard özeti yüklenirken hata: {e}")
-            logger.error(f"Dashboard özeti yüklenirken hata: {e}")
-
-    def ciz_aylik_satis_alıs_grafik(self):
-        """Aylık satış ve alış grafiklerini çizer."""
-        try:
-            fig = self.aylik_grafik_canvas.figure
-            fig.clear()
-            ax = fig.add_subplot(111)
-
-            simdi = datetime.now()
-            gecmis_bir_yil = simdi - timedelta(days=365)
-            
-            aylik_satis_ozeti = self.db.get_monthly_sales_summary(
-                baslangic_tarihi=gecmis_bir_yil.strftime('%Y-%m-%d'),
-                bitis_tarihi=simdi.strftime('%Y-%m-%d')
-            )
-            
-            if not isinstance(aylik_satis_ozeti, list):
-                aylik_satis_ozeti = []
-            
-            aylar = [item.get('ay_adi', '-') for item in aylik_satis_ozeti]
-            satislar = [item.get('toplam_satis', 0) for item in aylik_satis_ozeti]
-            alislar = [item.get('toplam_alis', 0) for item in aylik_satis_ozeti]
-            
-            if not aylar:
-                ax.text(0.5, 0.5, "Grafik verisi bulunamadı.", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=12)
+            # GÜVENLİK GÜNCELLEMESİ: 'api_servisi' özelliğinin var olup olmadığını kontrol et
+            if hasattr(self.db, 'api_servisi') and self.db.api_servisi is not None:
+                ozet_veriler = self.db.api_servisi.get_dashboard_ozet()
             else:
-                x = np.arange(len(aylar))
-                width = 0.35
-                
-                rects1 = ax.bar(x - width/2, satislar, width, label='Satış', color='green')
-                rects2 = ax.bar(x + width/2, alislar, width, label='Alış', color='red')
+                # api_servisi yoksa (örn: offline mod), hata vermek yerine boş veri döndür ve uyarı ver
+                ozet_veriler = None
+                self.app.set_status_message("Özet veriler alınamadı. Çevrimdışı modda olabilirsiniz.", "orange")
 
-                ax.set_ylabel('Tutar (TL)')
-                ax.set_title('Aylık Satış ve Alış Özeti')
-                ax.set_xticks(x)
-                ax.set_xticklabels(aylar, rotation=45, ha="right")
-                ax.legend()
-                
-                def autolabel(rects):
-                    for rect in rects:
-                        height = rect.get_height()
-                        if height > 0:
-                            ax.annotate(f'{height:,.0f}',
-                                        xy=(rect.get_x() + rect.get_width() / 2, height),
-                                        xytext=(0, 3),
-                                        textcoords="offset points",
-                                        ha='center', va='bottom', fontsize=8)
+            if ozet_veriler:
+                try:
+                    locale.setlocale(locale.LC_ALL, 'tr_TR.UTF-8')
+                except locale.Error:
+                    locale.setlocale(locale.LC_ALL, '')
 
-                autolabel(rects1)
-                autolabel(rects2)
+                self.lbl_toplam_satis_degeri.setText(f"<b>{locale.currency(ozet_veriler.get('aylik_satislar', 0), grouping=True)}</b>")
+                self.lbl_toplam_alis_degeri.setText(f"<b>{locale.currency(ozet_veriler.get('aylik_alislar', 0), grouping=True)}</b>")
+                self.lbl_toplam_tahsilat_degeri.setText(f"<b>{locale.currency(ozet_veriler.get('toplam_tahsilatlar', 0), grouping=True)}</b>")
+                self.lbl_toplam_odeme_degeri.setText(f"<b>{locale.currency(ozet_veriler.get('toplam_odemeler', 0), grouping=True)}</b>")
+            else:
+                # ozet_veriler None ise (API çağrısı yapılamadıysa) etiketleri bilgilendirici bir metinle doldur
+                self.lbl_toplam_satis_degeri.setText("<b>--,-- TL</b>")
+                self.lbl_toplam_alis_degeri.setText("<b>--,-- TL</b>")
+                self.lbl_toplam_tahsilat_degeri.setText("<b>--,-- TL</b>")
+                self.lbl_toplam_odeme_degeri.setText("<b>--,-- TL</b>")
 
-            fig.tight_layout()
-            self.aylik_grafik_canvas.draw()
-            
         except Exception as e:
-            logger.error(f"Aylık satış/alış grafiği çizilirken hata: {e}", exc_info=True)
-            self.app.set_status_message(f"Aylık grafik çizilirken hata: {e}", "red")
+            # API'den bir hata dönerse (örn: 500 Internal Server Error)
+            QMessageBox.warning(self, "Veri Yükleme Hatası", f"Özet bilgileri yüklenirken bir API hatası oluştu: {e}")
+            self.lbl_toplam_satis_degeri.setText("<b>Hata Oluştu</b>")
+            self.lbl_toplam_alis_degeri.setText("<b>Hata Oluştu</b>")
+            self.lbl_toplam_tahsilat_degeri.setText("<b>Hata Oluştu</b>")
+            self.lbl_toplam_odeme_degeri.setText("<b>Hata Oluştu</b>")
+
+#    def ciz_aylik_satis_alıs_grafik(self):
+#        """Aylık satış ve alış grafiklerini çizer."""
+#        try:
+#            fig = self.aylik_grafik_canvas.figure
+#            fig.clear()
+#            ax = fig.add_subplot(111)
+#
+#            simdi = datetime.now()
+#            gecmis_bir_yil = simdi - timedelta(days=365)
+#            
+#            aylik_satis_ozeti = self.db.get_monthly_sales_summary(
+#                baslangic_tarihi=gecmis_bir_yil.strftime('%Y-%m-%d'),
+#                bitis_tarihi=simdi.strftime('%Y-%m-%d')
+#            )
+#            
+#            if not isinstance(aylik_satis_ozeti, list):
+#                aylik_satis_ozeti = []
+#            
+#            aylar = [item.get('ay_adi', '-') for item in aylik_satis_ozeti]
+#            satislar = [item.get('toplam_satis', 0) for item in aylik_satis_ozeti]
+#            alislar = [item.get('toplam_alis', 0) for item in aylik_satis_ozeti]
+#            
+#            if not aylar:
+#                ax.text(0.5, 0.5, "Grafik verisi bulunamadı.", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=12)
+#            else:
+#                x = np.arange(len(aylar))
+#                width = 0.35
+#                
+#                rects1 = ax.bar(x - width/2, satislar, width, label='Satış', color='green')
+#                rects2 = ax.bar(x + width/2, alislar, width, label='Alış', color='red')
+#
+#                ax.set_ylabel('Tutar (TL)')
+#                ax.set_title('Aylık Satış ve Alış Özeti')
+#                ax.set_xticks(x)
+#                ax.set_xticklabels(aylar, rotation=45, ha="right")
+#                ax.legend()
+#                
+#                def autolabel(rects):
+#                    for rect in rects:
+#                        height = rect.get_height()
+#                        if height > 0:
+#                            ax.annotate(f'{height:,.0f}',
+#                                        xy=(rect.get_x() + rect.get_width() / 2, height),
+#                                        xytext=(0, 3),
+#                                        textcoords="offset points",
+#                                        ha='center', va='bottom', fontsize=8)
+#
+#                autolabel(rects1)
+#                autolabel(rects2)
+#
+#            fig.tight_layout()
+#            self.aylik_grafik_canvas.draw()
+#            
+#        except Exception as e:
+#            logger.error(f"Aylık satış/alış grafiği çizilirken hata: {e}", exc_info=True)
+#            self.app.set_status_message(f"Aylık grafik çizilirken hata: {e}", "red")
 
 class FinansalIslemlerSayfasi(QWidget): 
     def __init__(self, parent, db_manager, app_ref):
@@ -8033,12 +8041,35 @@ class FirmaKayitPenceresi(QDialog):
         sifre = self.yonetici_sifre_entry.text()
         sifre_tekrar = self.yonetici_sifre_tekrar_entry.text()
 
+        # Boş alan kontrolü
         if not all([firma_unvani, yonetici_ad_soyad, email, telefon, sifre, sifre_tekrar]):
             QMessageBox.warning(self, "Eksik Bilgi", "Lütfen tüm zorunlu (*) alanları doldurun.")
             return
 
+        # Şifre eşleşme kontrolü
         if sifre != sifre_tekrar:
             QMessageBox.warning(self, "Şifre Hatası", "Girdiğiniz şifreler uyuşmuyor.")
+            return
+        
+        # ✅ YENİ: Şifre uzunluk kontrolü
+        if len(sifre) < 6:
+            QMessageBox.warning(self, "Şifre Hatası", "Şifre en az 6 karakter olmalıdır.")
+            return
+        
+        # ✅ YENİ: E-posta format kontrolü (basit)
+        if "@" not in email or "." not in email:
+            QMessageBox.warning(self, "E-posta Hatası", "Geçerli bir e-posta adresi giriniz.")
+            return
+        
+        # ✅ YENİ: Telefon numarası kontrolü
+        telefon_rakam = ''.join(filter(str.isdigit, telefon))
+        if len(telefon_rakam) < 10:
+            QMessageBox.warning(self, "Telefon Hatası", "Telefon numarası en az 10 haneli olmalıdır.")
+            return
+        
+        # ✅ YENİ: Ad-Soyad kontrolü (en az 2 karakter)
+        if len(yonetici_ad_soyad) < 2:
+            QMessageBox.warning(self, "Ad Soyad Hatası", "Yönetici adı soyadı en az 2 karakter olmalıdır.")
             return
 
         yeni_firma_data = {
@@ -8053,7 +8084,16 @@ class FirmaKayitPenceresi(QDialog):
             success, message = self.db.yeni_firma_olustur(yeni_firma_data)
             
             if success:
-                QMessageBox.information(self, "Başarılı", f"Firma hesabı başarıyla oluşturuldu!\n\nE-posta: {email}\n\nLütfen bu bilgilerle giriş yapın.")
+                # Sunucudan dönen mesajı parse et (firma_no varsa al)
+                firma_no_mesaj = ""
+                if isinstance(message, dict) and "firma_no" in message:
+                    firma_no_mesaj = f"\n\nFirma Numaranız: {message['firma_no']}\n(Personel girişi için bu numarayı kullanın)"
+                
+                QMessageBox.information(
+                    self, 
+                    "Başarılı", 
+                    f"Firma hesabı başarıyla oluşturuldu!{firma_no_mesaj}\n\nE-posta: {email}\n\nLütfen bu bilgilerle giriş yapın."
+                )
                 self.accept()
             else:
                 QMessageBox.critical(self, "Kayıt Hatası", f"Hesap oluşturulamadı:\n{message}")
