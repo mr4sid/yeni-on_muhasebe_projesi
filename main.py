@@ -261,11 +261,16 @@ class Ui_MainWindow_Minimal:
         self.menuRaporlar.addAction(MainWindow.actionSiparis_Raporu)
         self.menuRaporlar.addAction(MainWindow.actionNitelik_Raporu)
 
+        MainWindow.actionPersonel_Yonetimi = QAction(MainWindow)
+        MainWindow.actionPersonel_Yonetimi.setObjectName("actionPersonel_Yonetimi")
+        MainWindow.actionPersonel_Yonetimi.setText("Personel Yönetimi")
+
         self.menuAyarlar = self.menubar.addMenu("Ayarlar")
         self.menuAyarlar.addAction(MainWindow.actionYedekle)
         self.menuAyarlar.addAction(MainWindow.actionGeri_Y_kle)
         self.menuAyarlar.addAction(MainWindow.actionAPI_Ayarlar)
         self.menuAyarlar.addAction(MainWindow.actionY_netici_Ayarlar)
+        self.menuAyarlar.addAction(MainWindow.actionPersonel_Yonetimi)
         self.menuAyarlar.addAction(MainWindow.actionVeri_Yonetimi)
 
 class App(QMainWindow):
@@ -274,10 +279,13 @@ class App(QMainWindow):
         self.current_user = current_user
         self.current_user_id = current_user.get("kullanici_id") or current_user.get("id")
         
+        self.firma_no = current_user.get("firma_no", "N/A") 
+        self.firma_adi = current_user.get("firma_adi", "Çınar Yapı")
+
         self.ui_main_window_setup = Ui_MainWindow_Minimal()
         self.ui_main_window_setup.setupUi(self)
 
-        self.setWindowTitle("Çınar Yapı Ön Muhasebe Programı")
+        self.setWindowTitle(f"{self.firma_adi} Ön Muhasebe Programı ({self.firma_no})")
         self.config = load_config()
 
         self.db_manager = None
@@ -603,6 +611,7 @@ class App(QMainWindow):
         self.actionVeri_Yonetimi.triggered.connect(self._veri_yonetimi_penceresi_ac)
         self.actionY_netici_Ayarlar.triggered.connect(self._yonetici_ayarlari_penceresi_ac)
         self.actionAPI_Ayarlar.triggered.connect(self._api_ayarlari_penceresi_ac)
+        self.actionPersonel_Yonetimi.triggered.connect(self._personel_yonetimi_goster)
 
     def _initial_load_data(self): 
         """
@@ -629,6 +638,21 @@ class App(QMainWindow):
         from pencereler import YeniMusteriEklePenceresi
         self.musteri_karti_penceresi = YeniMusteriEklePenceresi(self, self.db_manager, self.musteri_yonetimi_sayfasi.musteri_listesini_yenile, app_ref=self)
         self.musteri_karti_penceresi.show()
+
+    def _personel_yonetimi_goster(self):
+        """Personel Yönetimi Penceresini gösterir ve bir defa oluşturulmasını sağlar."""
+        from pencereler import PersonelYonetimiPenceresi 
+        
+        # Eğer pencere daha önce oluşturulmadıysa (lazy loading)
+        if not hasattr(self, '_personel_yonetimi_penceresi') or self._personel_yonetimi_penceresi is None:
+            # DÜZELTME: 'app_ref=self' argümanı kaldırıldı.
+            self._personel_yonetimi_penceresi = PersonelYonetimiPenceresi(self, self.db_manager)
+            self._personel_yonetimi_penceresi.show()
+        else:
+            # Zaten oluşturulduysa sadece göster ve aktif pencere yap
+            self._personel_yonetimi_penceresi.show()
+            self._personel_yonetimi_penceresi.activateWindow()
+        logger.info("Personel Yönetimi Penceresi açıldı.")
 
     def _tedarikci_karti_penceresi_ac(self): 
         from pencereler import YeniTedarikciEklePenceresi
@@ -748,22 +772,6 @@ class App(QMainWindow):
                 self.backup_worker.signals.error.connect(self._on_backup_error)
                 self.backup_worker.start()
 
-#    def _check_backup_completion(self, result_queue, bekleme_penceresi):
-#        if not result_queue.empty():
-#            self.backup_timer.stop()
-#            bekleme_penceresi.kapat()
-#            
-#            success, message, created_file_path = result_queue.get()
-#            
-#            if success and created_file_path and os.path.exists(created_file_path) and os.path.getsize(created_file_path) > 0:
-#                final_message = f"Yedekleme başarıyla tamamlandı. Dosya: {created_file_path}"
-#                QMessageBox.information(self, "Yedekleme", final_message)
-#                self.set_status_message(final_message, "green")
-#            else:
-#                final_message = f"Yedekleme işlemi tamamlanamadı veya dosya oluşturulamadı: {message}"
-#                QMessageBox.critical(self, "Yedekleme Hatası", final_message)
-#                self.set_status_message(final_message, "red")
-
     def _handle_backup_completion(self, success, message, created_file_path):
         """Yedekleme tamamlandığında sinyal tarafından çağrılan metot."""
         if hasattr(self, 'bekleme_penceresi') and self.bekleme_penceresi:
@@ -795,10 +803,6 @@ class App(QMainWindow):
             final_message = f"Geri yükleme işlemi tamamlanamadı: {message}"
             QMessageBox.critical(self, "Geri Yükleme Hatası", final_message)
             self.set_status_message(final_message, "red")
-
-#    def _pdf_olusturma_islemi(self, data, filename="rapor.pdf"):
-#        logger.info(f"PDF oluşturma işlemi çağrıldı. Veri boyutu: {len(data)} - Dosya Adı: {filename}")
-#        QMessageBox.information(self, "PDF Oluşturma", "PDF oluşturma işlevi entegrasyonu tamamlanmadı. Lütfen raporlama modülünü kontrol edin.")
 
     def _update_status_bar(self):
         self.statusBar().showMessage("Uygulama hazır.")

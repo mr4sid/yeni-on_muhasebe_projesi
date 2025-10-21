@@ -26,7 +26,7 @@ def create_initial_user():
         "soyad": "Yönetici",
         "email": "admin@master.com",
         "telefon": "0000000000",
-        "rol": "admin",
+        "rol": "SUPERADMİN",
         "firma_adi": "Master Yonetim Firmasi",
         "firma_no": "mv1000"
     }

@@ -91,6 +91,7 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
 
     tenant_db_name = user.firma.db_adi
     firma_adi = user.firma.unvan
+    firma_no = user.firma.firma_no
     
     try:
         tenant_engine = get_tenant_engine(tenant_db_name)
@@ -139,6 +140,7 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
         "sifre_hash": user.sifre_hash,
         "rol": user.rol,
         "firma_adi": firma_adi,
+        "firma_no": firma_no,
         "tenant_db_name": tenant_db_name,
         "ad_soyad": ad_soyad  # YENİ EKLENDİ
     }
@@ -269,7 +271,9 @@ def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Ses
             "kullanici_id": kullanici.id,
             "kullanici_adi": kullanici.kullanici_adi,
             "rol": kullanici.rol,
-            "sifre_hash": kullanici.sifre_hash
+            "sifre_hash": kullanici.sifre_hash,
+            "firma_no": firma.firma_no,
+            "firma_adi": firma.unvan
         }
     finally:
         # Oturumu kapatarak kaynakların serbest bırakıldığından emin oluyoruz.

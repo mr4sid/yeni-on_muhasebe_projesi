@@ -7907,8 +7907,8 @@ class GirisEkrani(QDialog):
             self.label_firma_no.hide()
             self._entry_firma_no.hide()
         else: # Personel seçili
-            self.label_username.setText("Kullanıcı Adı:")
-            self._entry_username.setPlaceholderText("Kullanıcı adınızı giriniz")
+            self.label_username.setText("E-posta:")
+            self._entry_username.setPlaceholderText("E-posta adresinizi giriniz")
             self.label_firma_no.show()
             self._entry_firma_no.show()
         

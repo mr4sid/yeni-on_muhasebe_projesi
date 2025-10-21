@@ -10,7 +10,7 @@ from typing import Dict, Generator
 from fastapi import HTTPException, status, Depends
 from jose import jwt
 from .database_core import create_tenant_engine_and_session
-from . import modeller, semalar
+from . import modeller
 from .guvenlik import oauth2_scheme
 from .config import settings
 # Loglama ayarları
@@ -86,19 +86,21 @@ def add_default_user_data(db: Session, kullanici_id_master: int):
         if not master_user:
             raise Exception("Master veritabanında yönetici kullanıcısı bulunamadı.")
 
-        # --- GÜNCELLEME: Tenant DB'ye yöneticiyi eklerken ID belirtmiyoruz ---
-        # Veritabanı, ilk kullanıcı olduğu için ID'yi otomatik olarak 1 yapacaktır.
+        # --- KRİTİK DÜZELTME: İlk kullanıcının rolünü zorla 'admin' olarak ata ---
         tenant_user = modeller.Kullanici(
             ad=master_user.ad,
             soyad=master_user.soyad,
             email=master_user.email,
             sifre_hash=master_user.sifre_hash,
             telefon=master_user.telefon,
-            rol=master_user.rol,
+            rol="admin", # ROL KESİN OLARAK ADMIN OLARAK ATANDI
             aktif=True
         )
         db.add(tenant_user)
-        db.flush() # ID'nin veritabanı tarafından atanmasını sağla
+        db.flush() # ID'nin veritabanı tarafından atanmasını sağlar (tenant_user.id = 1)
+
+        # ID sayacını, eklenen son ID'nin bir fazlası olarak ayarla.
+        db.execute(text(f"SELECT setval('kullanicilar_id_seq', (SELECT MAX(id) FROM kullanicilar))"))
 
         # Varsayılan Kasa/Banka, Müşteri ve Tedarikçi kayıtlarını oluştur
         nakit_kasa = modeller.KasaBankaHesap(kod="NAKIT_KASA", hesap_adi="Nakit Kasa", tip="KASA", bakiye=0.0, para_birimi="TRY", kullanici_id=tenant_user.id)
@@ -154,16 +156,20 @@ def get_db(token: str = Depends(oauth2_scheme)):
     from . import guvenlik
 
     db = None
-    master_db_session = next(get_master_db()) # <-- 1. ADIM: Master DB'yi al
+    master_db_session = next(get_master_db()) 
     try:
-        # <-- 2. ADIM: Aldığın Master DB'yi get_current_user'a parametre olarak ver
+        # get_current_user metodu token'ı Master DB'de doğrular.
+        # Master DB session'ı burada kapatılmaz, finally bloğunda kapatılır.
         current_user = guvenlik.get_current_user(token=token, db=master_db_session)
 
         tenant_db_name = None
         if hasattr(current_user, 'firma') and current_user.firma:
+            # KRİTİK DÜZELTME: Firma modelinde db_adi var mı diye kontrol et
             tenant_db_name = current_user.firma.db_adi
         
+        # Eğer yukarıdan tenant_db_name gelmezse, token payload'undan çekmeyi dene
         if not tenant_db_name:
+            # Token payload'undan firma_db çekimi
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
             tenant_db_name = payload.get("firma_db")
             if not tenant_db_name:
@@ -172,14 +178,18 @@ def get_db(token: str = Depends(oauth2_scheme)):
                     detail="Kullanıcıya atanmış bir firma veritabanı bulunamadı."
                 )
 
+        # Tenant DB oturumunu oluştur
         db = get_tenant_session_by_name(tenant_db_name)
         yield db
 
     except HTTPException as e:
         raise e
     except Exception as e:
+        # Hata durumunda, Yonetici modelinin çağrıldığı bir yer olabilir.
+        logger.error(f"Veritabanı oturumu oluşturulurken bir hata oluştu: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Veritabanı oturumu oluşturulurken bir hata oluştu: {e}")
     finally:
+        # Her durumda oturumları kapat
         if db is not None:
             db.close()
         if master_db_session is not None:

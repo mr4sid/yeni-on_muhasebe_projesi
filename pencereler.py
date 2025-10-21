@@ -8,6 +8,7 @@ import logging
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill 
 import locale 
+import json
 import requests
 import shutil
 import traceback
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (QTableWidget, QTableWidgetItem, QFormLayout,
     QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHeaderView, QTextEdit,
     QCheckBox, QFrame, QGroupBox, QDialogButtonBox,
     QMenu, QTabWidget,QSizePolicy, QProgressBar)
-from PySide6.QtGui import QFont, QPixmap, QDoubleValidator, QBrush, QColor
+from PySide6.QtGui import QFont, QPixmap, QDoubleValidator, QBrush, QColor, QPalette
 from PySide6.QtCore import Qt, QTimer, Signal, QLocale, Slot, QThread, QObject
 from veritabani import OnMuhasebe
 from hizmetler import FaturaService, TopluIslemService, CariService
@@ -6893,17 +6894,33 @@ class PersonelYonetimiPenceresi(QDialog):
     def __init__(self, parent, db_manager):
         super().__init__(parent)
         self.db_manager = db_manager
+        
+        # Ana pencereden firma no bilgisi çekiliyor
+        self.firma_no = getattr(parent, 'firma_no', "N/A")
+        # Güncelleme sırasında kullanılacak versiyon numarasını saklamak için
+        self.current_version = 1 
+        
         self.setWindowTitle("Personel Yönetimi")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(700, 400) 
 
         self.layout = QVBoxLayout(self)
 
         # Personel Listesi Tablosu
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(3)
-        self.table_widget.setHorizontalHeaderLabels(["ID", "Kullanıcı Adı", "Rol"])
-        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers) # Düzenlemeyi kapat
+        
+        self.table_widget.setColumnCount(7) 
+        self.table_widget.setHorizontalHeaderLabels([
+            "ID", "Ad", "Soyad", "E-posta", "Telefon", "Rol", "Aktif"
+        ])
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) 
+        self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        # FIRMA NO ETİKETİ
+        self.firma_no_label = QLabel(f"Firma No: {self.firma_no}")
+        self.firma_no_label.setAlignment(Qt.AlignCenter)
+        palette = self.firma_no_label.palette()
+        palette.setColor(QPalette.WindowText, QColor(255, 0, 0))
+        self.firma_no_label.setPalette(palette)
 
         # Butonlar
         self.btn_yeni_personel = QPushButton("Yeni Personel Ekle")
@@ -6912,59 +6929,211 @@ class PersonelYonetimiPenceresi(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.btn_yenile)
         button_layout.addStretch()
+        button_layout.addWidget(self.firma_no_label) 
+        button_layout.addStretch()
         button_layout.addWidget(self.btn_yeni_personel)
 
         self.layout.addWidget(self.table_widget)
         self.layout.addLayout(button_layout)
 
         # Sinyaller
-        self.btn_yeni_personel.clicked.connect(self._yeni_personel_ekle_dialog)
+        self.btn_yeni_personel.clicked.connect(lambda: self._personel_formu_dialog(None)) # Yeni form aç
         self.btn_yenile.clicked.connect(self.personel_listesini_yukle)
-
-        # Başlangıçta listeyi yükle
+        self.table_widget.doubleClicked.connect(self._personel_duzenle_trigger) # Düzenleme tetikleyici
+        
         self.personel_listesini_yukle()
 
+
     def personel_listesini_yukle(self):
-        self.table_widget.setRowCount(0) # Tabloyu temizle
-        personeller, hata = self.db_manager.personel_listesi_getir()
-        if hata:
-            QMessageBox.critical(self, "Hata", f"Personel listesi alınamadı:\n{hata}")
-            return
+        """API veya DB'den personel listesini çeker ve tabloyu günceller."""
+        personeller_response, hata = self.db_manager.personel_listesi_getir()
         
-        if personeller:
-            self.table_widget.setRowCount(len(personeller))
-            for row, personel in enumerate(personeller):
-                self.table_widget.setItem(row, 0, QTableWidgetItem(str(personel['id'])))
-                self.table_widget.setItem(row, 1, QTableWidgetItem(personel['kullanici_adi']))
-                self.table_widget.setItem(row, 2, QTableWidgetItem(personel['rol']))
+        if hata:
+            QMessageBox.critical(self, "Hata", f"Personel listesi yüklenemedi:\n{hata}")
+            self.table_widget.setRowCount(0) 
+            return
 
-    def _yeni_personel_ekle_dialog(self):
+        if personeller_response is None or not isinstance(personeller_response, dict) or "items" not in personeller_response:
+            QMessageBox.critical(self, "Hata", "Personel listesi alınamadı veya sunucu hatası devam ediyor. Lütfen sunucu loglarını kontrol edin.")
+            self.table_widget.setRowCount(0)
+            return
+
+        personel_listesi = personeller_response.get("items", [])
+        
+        self.table_widget.setRowCount(len(personel_listesi))
+        self.table_widget.setColumnCount(7) 
+        
+        for row, personel_data in enumerate(personel_listesi):
+            personel = personel_data 
+            
+            if isinstance(personel_data, str):
+                try:
+                    personel = json.loads(personel_data)
+                except:
+                    continue
+            
+            if not isinstance(personel, dict):
+                continue
+
+            # Tabloyu yeni sütun sırasına göre doldur
+            self.table_widget.setItem(row, 0, QTableWidgetItem(str(personel.get('id', 'N/A'))))
+            self.table_widget.setItem(row, 1, QTableWidgetItem(personel.get('ad', 'N/A')))
+            self.table_widget.setItem(row, 2, QTableWidgetItem(personel.get('soyad', 'N/A')))
+            self.table_widget.setItem(row, 3, QTableWidgetItem(personel.get('email', 'N/A')))
+            # KRİTİK EKLENTİ: Telefon bilgisi doldurma
+            self.table_widget.setItem(row, 4, QTableWidgetItem(personel.get('telefon', 'N/A'))) 
+            self.table_widget.setItem(row, 5, QTableWidgetItem(personel.get('rol', 'N/A')))
+            self.table_widget.setItem(row, 6, QTableWidgetItem("Aktif" if personel.get('aktif') else "Pasif"))
+
+    
+    def _personel_detay_getir(self, personel_id: int):
+        """db_manager üzerinden API'den tek bir personelin detayını çeker."""
+        # API'de /yonetici/personel/{id} rotasının var olduğu varsayılır.
+        return self.db_manager.personel_detay_getir(personel_id)
+
+
+    def _personel_duzenle_trigger(self, index):
+        """Tabloda çift tıklanan personelin ID'sini alıp düzenleme dialogunu açar."""
+        if index.isValid():
+            row = index.row()
+            personel_id_item = self.table_widget.item(row, 0)
+            if personel_id_item:
+                personel_id = int(personel_id_item.text())
+                
+                # API proxy metodunu çağırarak detayları al
+                personel_detay, hata = self._personel_detay_getir(personel_id)
+                
+                if hata:
+                    QMessageBox.critical(self, "Hata", f"Personel detayları çekilemedi: {hata}")
+                    return
+
+                if isinstance(personel_detay, dict) and personel_detay.get('id'):
+                    self._personel_formu_dialog(personel_detay)
+                else:
+                    QMessageBox.warning(self, "Hata", "Personel detayları doğru formatta alınamadı.")
+
+
+    def _personel_formu_dialog(self, personel_data=None):
+        """Personel ekleme/düzenleme formunu açar."""
         dialog = QDialog(self)
-        dialog.setWindowTitle("Yeni Personel Oluştur")
+        is_duzenle = personel_data is not None
+        dialog.setWindowTitle("Personel Düzenle" if is_duzenle else "Yeni Personel Oluştur")
         form_layout = QFormLayout(dialog)
-
-        kullanici_adi_input = QLineEdit(dialog)
+        
+        # Zorunlu alan etiketi için stil (Kırmızı *)
+        zorunlu_stil = "<span style='color: red;'>*</span>"
+        
+        # 1. Input Alanları
+        ad_input = QLineEdit(dialog)
+        soyad_input = QLineEdit(dialog)
+        email_input = QLineEdit(dialog)
+        telefon_input = QLineEdit(dialog) # TELEFON ALANI EKLENDİ
+        rol_combo = QComboBox(dialog)
+        aktif_check = QCheckBox("Aktif", dialog)
+        aktif_check.setChecked(True)
         sifre_input = QLineEdit(dialog)
         sifre_input.setEchoMode(QLineEdit.Password)
         
-        form_layout.addRow("Kullanıcı Adı:", kullanici_adi_input)
-        form_layout.addRow("Şifre:", sifre_input)
+        # 2. Rol Kısıtlamaları
+        personel_id = personel_data.get('id', 0) if is_duzenle else 0
+        mevcut_rol = personel_data.get('rol', 'personel').lower() if is_duzenle else 'personel'
+        
+        # Ana Yönetici (ID=1) rolü değiştirilemez ve sadece kendi rolünü gösterir.
+        if personel_id == 1: 
+            rol_combo.setDisabled(True)
+            rol_combo.addItem(mevcut_rol.upper())
+        else:
+            # Diğer personeller için sadece personel ve yönetici seçenekleri
+            rol_combo.addItems(["personel", "yonetici"])
+        
+        # 3. Verileri Doldur (Düzenleme Modu)
+        if is_duzenle:
+            self.current_version = personel_data.get('version', 1) 
+            
+            ad_input.setText(personel_data.get('ad', ''))
+            soyad_input.setText(personel_data.get('soyad', ''))
+            email_input.setText(personel_data.get('email', ''))
+            telefon_input.setText(personel_data.get('telefon', '')) # TELEFON DOLDURMA
+            
+            if personel_id != 1:
+                 rol_combo.setCurrentText(mevcut_rol)
+            
+            aktif_check.setChecked(personel_data.get('aktif', True))
 
+        # 4. Form Düzeni (Zorunlu Alan İşaretleri)
+        form_layout.addRow("Ad:" + zorunlu_stil, ad_input) 
+        form_layout.addRow("Soyad:", soyad_input)
+        form_layout.addRow("E-posta:" + zorunlu_stil, email_input) 
+        form_layout.addRow("Telefon:", telefon_input) 
+        form_layout.addRow("Rol:", rol_combo)
+        form_layout.addRow("Durum:", aktif_check)
+        form_layout.addRow("Şifre (Değiştirmek için doldurun):", sifre_input) 
+        
+        # 5. Butonlar ve Bağlantılar
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
         form_layout.addRow(buttons)
-        buttons.accepted.connect(dialog.accept)
+        buttons.accepted.connect(lambda: self._personel_kaydet_ve_kapat(
+            dialog, is_duzenle, ad_input, soyad_input, email_input, telefon_input, rol_combo, sifre_input, aktif_check, personel_data.get('id') if is_duzenle else None
+        ))
         buttons.rejected.connect(dialog.reject)
 
-        if dialog.exec() == QDialog.Accepted:
-            kullanici_adi = kullanici_adi_input.text()
-            sifre = sifre_input.text()
-            if not kullanici_adi or not sifre:
-                QMessageBox.warning(self, "Eksik Bilgi", "Kullanıcı adı ve şifre boş bırakılamaz.")
-                return
+        dialog.exec()        
+    
+    def _personel_kaydet_ve_kapat(self, dialog, is_duzenle, ad_input, soyad_input, email_input, telefon_input, rol_combo, sifre_input, aktif_check, personel_id):
+        """Personel kaydetme ve güncelleme işlemini yapar, zorunlu alanları kontrol eder."""
+        
+        # 1. Veri Toplama ve Zorunluluk Kontrolü
+        ad = ad_input.text().strip()
+        email = email_input.text().strip()
+        sifre = sifre_input.text()
+        
+        # Zorunluluk Kontrolleri
+        if not ad:
+            QMessageBox.warning(dialog, "Eksik Bilgi", "Ad alanı zorunludur. Lütfen doldurunuz.")
+            return
+        if not email:
+            QMessageBox.warning(dialog, "Eksik Bilgi", "E-posta alanı zorunludur. Lütfen doldurunuz.")
+            return
+        if not is_duzenle and not sifre:
+             QMessageBox.warning(dialog, "Eksik Bilgi", "Yeni personel için şifre zorunludur.")
+             return
 
-            yeni_personel, hata = self.db_manager.personel_olustur(kullanici_adi, sifre)
-            if hata:
-                QMessageBox.critical(self, "Hata", f"Personel oluşturulamadı:\n{hata}")
-            else:
-                QMessageBox.information(self, "Başarılı", f"Personel '{yeni_personel['kullanici_adi']}' başarıyla oluşturuldu.")
-                self.personel_listesini_yukle() # Listeyi yenile
+
+        # 2. Veri Hazırlama
+        personel_data = {
+            "ad": ad,
+            "soyad": soyad_input.text().strip(),
+            "email": email,
+            "telefon": telefon_input.text().strip(), # TELEFON DAHİL EDİLDİ
+            "aktif": aktif_check.isChecked()
+        }
+        
+        # Rolü sadece değiştirilebilir durumda ise al
+        if not rol_combo.isDisabled():
+            personel_data["rol"] = rol_combo.currentText().lower()
+        
+        # Şifre varsa eklenir
+        if sifre:
+            personel_data["sifre"] = sifre
+
+        # 3. API Çağrısı
+        if is_duzenle:
+            # Version eklenir
+            personel_data["version"] = self.current_version 
+            personel_data["rol"] = personel_data.get("rol", rol_combo.currentText().lower()) # Pasif rol alanındaki değeri koru
+            
+            basarili, mesaj = self.db_manager.personel_guncelle(personel_id, personel_data) 
+        else:
+            basarili, mesaj = self.db_manager.personel_olustur(personel_data)
+
+        # 4. Sonuç
+        if basarili:
+            QMessageBox.information(self, "Başarılı", mesaj)
+            self.personel_listesini_yukle() 
+            dialog.accept() 
+        else:
+            QMessageBox.critical(self, "Hata", f"İşlem başarısız oldu:\n{mesaj}")
+
+    def _yeni_personel_ekle_dialog(self):
+        """Yeni personel ekleme butonundan çağrılır."""
+        self._personel_formu_dialog(None)            

@@ -87,7 +87,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     except JWTError:
         raise credentials_exception
 
-    # DÜZELTME: 'Yonetici' modeli yerine doğru model olan 'Kullanici' modelini sorguluyoruz.
+    # KRİTİK DÜZELTME: 'Yonetici' yerine doğru model olan 'Kullanici' modelini sorguluyoruz.
     user = db.query(modeller.Kullanici).filter(modeller.Kullanici.email == token_data.username).first()
     
     if user is None:

@@ -22,12 +22,15 @@ def get_dashboard_ozet_endpoint(
     bitis_tarihi: date = Query(None, description="Bitiş tarihi (YYYY-MM-DD)"),
     db: Session = Depends(veritabani.get_db)
 ):
+    today = date.today()
+    vade_yaklasma_limit = today + timedelta(days=30)
     
+    # --- 1 & 2: SATIŞ/ALIŞ TOPLAMLARI ---
     satis_query = db.query(
         func.sum(modeller.Fatura.genel_toplam).label("toplam_satis"),
         func.count(modeller.Fatura.id).label("satis_sayisi")
     ).filter(
-        modeller.Fatura.fatura_turu == "SATIS",
+        modeller.Fatura.fatura_turu == modeller.FaturaTuruEnum.SATIS,
         modeller.Fatura.tarih.between(baslangic_tarihi, bitis_tarihi)
     )
     satis_sonuclari = satis_query.first()
@@ -36,33 +39,99 @@ def get_dashboard_ozet_endpoint(
         func.sum(modeller.Fatura.genel_toplam).label("toplam_alis"),
         func.count(modeller.Fatura.id).label("alis_sayisi")
     ).filter(
-        modeller.Fatura.fatura_turu == "ALIS",
+        modeller.Fatura.fatura_turu == modeller.FaturaTuruEnum.ALIS,
         modeller.Fatura.tarih.between(baslangic_tarihi, bitis_tarihi)
     )
     alis_sonuclari = alis_query.first()
     
+    # --- 3: TOPLAM KİŞİ/ÜRÜN SAYILARI ---
     toplam_musteri = db.query(func.count(modeller.Musteri.id)).scalar()
     toplam_tedarikci = db.query(func.count(modeller.Tedarikci.id)).scalar()
     toplam_urun = db.query(func.count(modeller.Stok.id)).scalar()
     
-    # --- ÇÖZÜM: Eksik olan ve hata veren tüm alanları varsayılan değerlerle ekliyoruz ---
+    # --- 4: TOPLAM TAHSİLATLAR / ÖDEMELER (Kasa/Banka Hareketlerini Kapsar) ---
+    
+    # Cari Hareketlerden Tahsilat/Ödemeler (Nakit/Banka ilişkili)
+    tahsilat_cari = db.query(func.sum(modeller.CariHareket.tutar)).filter(
+        modeller.CariHareket.tarih.between(baslangic_tarihi, bitis_tarihi),
+        modeller.CariHareket.islem_yone == modeller.IslemYoneEnum.ALACAK, # Şirkete para girişi
+        modeller.CariHareket.kasa_banka_id.isnot(None) # Nakit/Banka ile ilişkili
+    ).scalar() or 0.0
+
+    odeme_cari = db.query(func.sum(modeller.CariHareket.tutar)).filter(
+        modeller.CariHareket.tarih.between(baslangic_tarihi, bitis_tarihi),
+        modeller.CariHareket.islem_yone == modeller.IslemYoneEnum.BORC, # Şirketten para çıkışı
+        modeller.CariHareket.kasa_banka_id.isnot(None) # Nakit/Banka ile ilişkili
+    ).scalar() or 0.0
+
+    # Gelir/Giderlerden Tahsilat/Ödemeler (Nakit/Banka ilişkili)
+    tahsilat_gg = db.query(func.sum(modeller.GelirGider.tutar)).filter(
+        modeller.GelirGider.tarih.between(baslangic_tarihi, bitis_tarihi),
+        modeller.GelirGider.tip == modeller.GelirGiderTipEnum.GELİR,
+        modeller.GelirGider.kasa_banka_id.isnot(None)
+    ).scalar() or 0.0
+
+    odeme_gg = db.query(func.sum(modeller.GelirGider.tutar)).filter(
+        modeller.GelirGider.tarih.between(baslangic_tarihi, bitis_tarihi),
+        modeller.GelirGider.tip == modeller.GelirGiderTipEnum.GİDER,
+        modeller.GelirGider.kasa_banka_id.isnot(None)
+    ).scalar() or 0.0
+
+    toplam_tahsilatlar = tahsilat_cari + tahsilat_gg
+    toplam_odemeler = odeme_cari + odeme_gg
+
+    # --- 5: KRİTİK STOK SAYISI ---
+    kritik_stok_sayisi = db.query(modeller.Stok).filter(
+        modeller.Stok.miktar <= modeller.Stok.min_stok_seviyesi
+    ).count()
+
+    # --- 6: EN ÇOK SATAN ÜRÜNLER (Top 5) ---
+    en_cok_satanlar = db.query(
+        modeller.Stok.ad.label("urun_adi"),
+        func.sum(modeller.FaturaKalemi.miktar).label("toplam_miktar")
+    ).join(modeller.FaturaKalemi, modeller.FaturaKalemi.urun_id == modeller.Stok.id)\
+     .join(modeller.Fatura, modeller.FaturaKalemi.fatura_id == modeller.Fatura.id)\
+     .filter(
+         modeller.Fatura.fatura_turu == modeller.FaturaTuruEnum.SATIS,
+         modeller.Fatura.tarih.between(baslangic_tarihi, bitis_tarihi)
+     )\
+     .group_by(modeller.Stok.ad)\
+     .order_by(func.sum(modeller.FaturaKalemi.miktar).desc())\
+     .limit(5)\
+     .all()
+     
+    # Pydantic modeline dönüştür
+    en_cok_satan_urunler_list = [
+        modeller.EnCokSatanUrun(urun_adi=item.urun_adi, toplam_miktar=item.toplam_miktar) 
+        for item in en_cok_satanlar
+    ]
+    
+    # --- 7: VADESİ YAKLAŞAN ALACAKLAR (Müşteri - Şirket Alacağı) ---
+    vadesi_yaklasan_alacaklar_toplami = db.query(func.sum(modeller.CariHareket.tutar)).filter(
+        modeller.CariHareket.cari_tip == modeller.CariTipiEnum.MUSTERI,
+        modeller.CariHareket.islem_yone == modeller.IslemYoneEnum.ALACAK,
+        modeller.CariHareket.odeme_turu == modeller.OdemeTuruEnum.ACIK_HESAP,
+        modeller.CariHareket.vade_tarihi.between(today, vade_yaklasma_limit)
+    ).scalar() or 0.0
+    
+    # --- 8: VADESİ GEÇMİŞ BORÇLAR (Tedarikçi - Şirket Borcu) ---
+    vadesi_gecmis_borclar_toplami = db.query(func.sum(modeller.CariHareket.tutar)).filter(
+        modeller.CariHareket.cari_tip == modeller.CariTipiEnum.TEDARIKCI,
+        modeller.CariHareket.islem_yone == modeller.IslemYoneEnum.BORC,
+        modeller.CariHareket.odeme_turu == modeller.OdemeTuruEnum.ACIK_HESAP,
+        modeller.CariHareket.vade_tarihi < today
+    ).scalar() or 0.0
+    
+    # --- SONUÇ DÖNÜŞÜ ---
     return {
-        # Mevcut hesaplamalar (isimleri modelle uyumlu hale getirildi)
         "toplam_satislar": satis_sonuclari.toplam_satis or 0.0,
-        "satis_sayisi": satis_sonuclari.satis_sayisi or 0,
         "toplam_alislar": alis_sonuclari.toplam_alis or 0.0,
-        "alis_sayisi": alis_sonuclari.alis_sayisi or 0,
-        "toplam_musteri": toplam_musteri or 0,
-        "toplam_tedarikci": toplam_tedarikci or 0,
-        "toplam_urun": toplam_urun or 0,
-        
-        # Pydantic modelinin beklediği ama henüz hesaplanmayan eksik alanlar
-        "toplam_tahsilatlar": 0.0,
-        "toplam_odemeler": 0.0,
-        "kritik_stok_sayisi": 0,
-        "en_cok_satan_urunler": [],  # Boş bir liste
-        "vadesi_yaklasan_alacaklar_toplami": 0.0,
-        "vadesi_gecmis_borclar_toplami": 0.0
+        "toplam_tahsilatlar": toplam_tahsilatlar,
+        "toplam_odemeler": toplam_odemeler,
+        "kritik_stok_sayisi": kritik_stok_sayisi,
+        "en_cok_satan_urunler": en_cok_satan_urunler_list,
+        "vadesi_yaklasan_alacaklar_toplami": vadesi_yaklasan_alacaklar_toplami,
+        "vadesi_gecmis_borclar_toplami": vadesi_gecmis_borclar_toplami
     }
 
 @router.get("/satislar_detayli_rapor", response_model=modeller.FaturaListResponse)

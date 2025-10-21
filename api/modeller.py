@@ -52,12 +52,25 @@ class Firma(Base):
     __tablename__ = 'firmalar'
 
     id = Column(Integer, primary_key=True)
-    unvan = Column(String(200), unique=True, nullable=False) # 'firma_adi' -> 'unvan' olarak değiştirildi
-    db_adi = Column(String(200), unique=True, nullable=False) # 'tenant_db_name' -> 'db_adi' olarak değiştirildi
+    unvan = Column(String(200), unique=True, nullable=False)
+    db_adi = Column(String(200), unique=True, nullable=False)
     firma_no = Column(String(50), unique=True, nullable=False, index=True)
-    kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id'))
-    kullanicilar = relationship("Kullanici", back_populates="firma", foreign_keys="[Kullanici.firma_id]")
-    kurucu_personel = relationship("Kullanici", back_populates="kurdugu_firma", foreign_keys=[kurucu_personel_id])
+    kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id')) 
+    
+    # KRİTİK DÜZELTME 1: Bir Firma -> Tüm Personel (Yabancı Anahtar: Kullanici.firma_id)
+    kullanicilar = relationship(
+        "Kullanici", 
+        back_populates="firma", 
+        foreign_keys="[Kullanici.firma_id]" # Kullanıcı tablosundaki FK'yı kullan
+    )
+    
+    # KRİTİK DÜZELTME 2: Bir Firma -> Kurucu Personel (Yabancı Anahtar: Firma.kurucu_personel_id)
+    kurucu_personel = relationship(
+        "Kullanici", 
+        back_populates="kurdugu_firma", 
+        foreign_keys="[Firma.kurucu_personel_id]", # Firma tablosundaki FK'yı kullan
+        uselist=False
+    )
 
 # --- SİRKET MODELLERİ (ORM) ---
 class SirketBilgileri(VersionedMixin, Base):
@@ -113,23 +126,38 @@ class Ayarlar(VersionedMixin, Base):
 class Kullanici(VersionedMixin, Base):
     __tablename__ = 'kullanicilar'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     sifre_hash = Column(String(255))
     ad = Column(String(50))
     soyad = Column(String(50))
     email = Column(String(100), unique=True)
     telefon = Column(String(20))
 
-    firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True)
+    firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True) 
     rol = Column(String(50), default='kullanici')
     aktif = Column(Boolean, default=True)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     son_giris_tarihi = Column(DateTime, nullable=True)
     
-    firma = relationship("Firma", back_populates="kullanicilar", foreign_keys=[firma_id])
+    # KRİTİK DÜZELTME 3: Ait olduğu Firma (back_populates for Firma.kullanicilar)
+    firma = relationship(
+        "Firma", 
+        back_populates="kullanicilar",
+        foreign_keys="[Kullanici.firma_id]" # Kullanici tablosundaki FK'yı kullan
+    )
+
+    # KRİTİK DÜZELTME 4: Kurduğu Firma (back_populates for Firma.kurucu_personel)
+    kurdugu_firma = relationship(
+        "Firma", 
+        back_populates="kurucu_personel", 
+        foreign_keys="[Firma.kurucu_personel_id]", # Firma tablosundaki FK'yı kullan
+        uselist=False
+    )
+    
+    # Diğer ilişkiler
     faturalar = relationship("Fatura", back_populates="kullanici")
     stoklar = relationship("Stok", back_populates="kullanici")
-    kurdugu_firma = relationship("Firma", back_populates="kurucu_personel", foreign_keys=[Firma.kurucu_personel_id])
+    siparisler = relationship("Siparis", back_populates="kullanici")
     master_ayarlar = relationship("Ayarlar", back_populates="kullanici")
     
 class FirmaRead(BaseOrmModel): id: int; firma_adi: str; tenant_db_name: str; olusturma_tarihi: datetime
@@ -137,7 +165,8 @@ class FirmaRead(BaseOrmModel): id: int; firma_adi: str; tenant_db_name: str; olu
 # Kullanıcı Modelleri (Pydantic)
 class KullaniciBase(BaseOrmModel): ad: str; soyad: str; email: EmailStr; telefon: Optional[str] = None; rol: Optional[str] = "admin"; aktif: Optional[bool] = True
 
-class KullaniciCreate(KullaniciBase): sifre: str; firma_adi: str
+class KullaniciCreate(KullaniciBase):
+    sifre: str
 
 class KullaniciLogin(BaseModel):
     """Giriş artık e-posta ile yapılır."""
@@ -149,6 +178,7 @@ class KullaniciRead(KullaniciBase):
     firma_id: Optional[int] = None
     firma_adi: Optional[str] = None
     tenant_db_name: Optional[str] = None 
+    firma_no: Optional[str] = None
     olusturma_tarihi: datetime
     son_giris_tarihi: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True, exclude={'sifre_hash'})
@@ -163,6 +193,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     firma_adi: str
+    firma_no: str
 
 class TokenData(BaseModel):
     kullanici_adi: Optional[str] = None
@@ -712,12 +743,17 @@ class Siparis(VersionedMixin, Base):
     cari_tip = Column(String(20))
     siparis_notlari = Column(Text)
     genel_toplam = Column(Float, default=0.0)
-    kullanici_id = Column(Integer, nullable=False)
+    
+    # KRİTİK DÜZELTME 3: Kullanici Foreign Key Eklendi
+    kullanici_id = Column(Integer, ForeignKey('kullanicilar.id'), nullable=False) 
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     
     kalemler = relationship("SiparisKalemi", back_populates="siparis", cascade="all, delete-orphan")
     
-    # GÜNCELLENMİŞ İLİŞKİLER
+    # Eklendi: Kullanici ilişkisi back_populates ile
+    kullanici = relationship("Kullanici", back_populates="siparisler") 
+    
+    # GÜNCELLENMİŞ İLİŞKİLER (Musteri/Tedarikci)
     musteri = relationship("Musteri",
                          primaryjoin="and_(foreign(Siparis.cari_id) == Musteri.id, Siparis.cari_tip == 'MUSTERI')",
                          back_populates="siparisler",
@@ -1315,6 +1351,7 @@ class OfflineLoginResponse(BaseModel):
     sifre_hash: str
     rol: str
     firma_adi: str
+    firma_no: str
     tenant_db_name: str
     ad_soyad: str
 

@@ -1482,33 +1482,6 @@ class OnMuhasebe:
                 self.is_online = False
         return 0.0
 
-#    def get_total_collections(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
-#        if self.is_online:
-#            try:
-#                summary = self._make_api_request(
-#                    "GET",
-#                    "/raporlar/dashboard_ozet",
-#                    params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi}
-#                )
-#                if summary is not None:
-#                    return summary.get("toplam_tahsilatlar", 0.0)
-#            except Exception as e:
-#                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
-#                self.is_online = False
-#        return 0.0
-
-#    def get_total_payments(self, baslangic_tarihi: str = None, bitis_tarihi: str = None):
-#        """Toplam ödemeleri çeker. (kullanici_id kaldırıldı)"""
-#        if self.is_online:
-#            try:
-#                summary = self._make_api_request("GET", "/raporlar/dashboard_ozet", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
-#                if summary is not None:
-#                    return summary.get("toplam_odemeler", 0.0)
-#            except Exception as e:
-#                logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
-#                self.is_online = False
-#        return 0.0
-
     def get_satislar_detayli_rapor(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str, cari_id: int = None):
         params = {"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi, "cari_id": cari_id, "kullanici_id": kullanici_id}
         if self.is_online:
@@ -1550,23 +1523,6 @@ class OnMuhasebe:
             "net_kar": 0.0
         }
                 
-#    def get_monthly_sales_summary(self, baslangic_tarihi: str, bitis_tarihi: str):
-#        """Aylık satış özetini çeker. (kullanici_id kaldırıldı)"""
-#        if self.is_online:
-#            try:
-#                # DÜZELTME: kullanici_id imzadan ve params'tan kaldırıldı.
-#                response = self._make_api_request("GET", "/raporlar/kar_zarar_verileri", params={"baslangic_tarihi": baslangic_tarihi, "bitis_tarihi": bitis_tarihi})
-#                if response is not None:
-#                    # NOT: Bu metot artık kar/zarar verilerini döndürüyor.
-#                    # Eğer arayüzde aylık satış listesi bekleniyorsa bu metotun API'de düzeltilmesi gerekir.
-#                    return response
-#            except Exception as e:
-#                # DÜZELTME: self.app bağımlılığı kaldırıldı.
-#                logger.error(f"Aylık satış özeti API'den çekilirken hata: {e}", exc_info=True)
-#                self.is_online = False
-#        
-#        return {"items": [], "total": 0}
-
     def get_monthly_income_expense_summary(self, baslangic_tarihi: str, bitis_tarihi: str):
         """Aylık gelir/gider özetini çeker. (kullanici_id kaldırıldı)"""
         if self.is_online:
@@ -1625,16 +1581,6 @@ class OnMuhasebe:
             logger.error(f"Tüm kasa/banka bakiyeleri çekilirken hata: {e}")
             return []
 
-#    def get_monthly_cash_flow_summary(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
-#        """Nakit akışı raporu için aylık nakit akışı özetini çeker."""
-#        try:
-#            yil = int(baslangic_tarihi.split('-')[0])
-#            response = self._make_api_request("GET", "/raporlar/gelir_gider_aylik_ozet", params={"yil": yil, "kullanici_id": kullanici_id})
-#            return response.get("aylik_ozet", [])
-#        except Exception as e:
-#            logger.error(f"Aylık nakit akışı özeti çekilirken hata: {e}")
-#            return []
-
     def get_cari_yaslandirma_verileri(self, tarih: str = None):
         params = {"tarih": tarih} if tarih else {}
         try:
@@ -1643,10 +1589,6 @@ class OnMuhasebe:
         except Exception as e:
             logger.error(f"Cari yaşlandırma verileri çekilirken hata: {e}")
             return {"musteri_alacaklar": [], "tedarikci_borclar": []}
-
-#    def get_stock_value_by_category(self, kullanici_id: int):
-#        logger.warning(f"get_stock_value_by_category metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
-#        return {"items": [], "total": 0}
 
     def get_critical_stock_items(self):
         if self.is_online:
@@ -1658,10 +1600,6 @@ class OnMuhasebe:
                 logger.error(f"API hatası. Yerel veritabanı kullanılıyor: {e}", exc_info=True)
                 self.is_online = False
         return []
-            
-#    def get_sales_by_payment_type(self, kullanici_id: int, baslangic_tarihi: str, bitis_tarihi: str):
-#        logger.warning(f"get_sales_by_payment_type metodu API'de doğrudan karşılığı yok. Simüle ediliyor.")
-#        return []
 
     def get_top_selling_products(self, baslangic_tarihi: str, bitis_tarihi: str, limit: int = 5):
         """En çok satan ürünleri çeker. (kullanici_id kaldırıldı)"""
@@ -2182,46 +2120,72 @@ class OnMuhasebe:
 
     def personel_listesi_getir(self):
         """Giriş yapmış yöneticinin personel listesini API'den alır."""
-        if not self.is_online or not self.access_token:
-            logger.warning("Personel listesi için çevrimiçi mod ve yetkilendirme gereklidir.")
+        if not self.is_online:
+            logger.warning("Personel listesi için çevrimiçi mod gereklidir.")
             return None, "Çevrimdışı veya yetkisiz."
         try:
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            response = self.session.get(f"{self.api_base_url}/yonetici/personel-listesi", headers=headers)
-            response.raise_for_status()
-            return response.json(), None
-        except requests.exceptions.HTTPError as e:
-            error_message = f"API'den personel listesi alınamadı (HTTP {e.response.status_code}): {e.response.text}"
-            logger.error(error_message)
+            # KRİTİK DÜZELTME: self.session yerine _make_api_request kullanıldı.
+            # _make_api_request, Authorization header'ını otomatik ekler.
+            response = self._make_api_request("GET", "/yonetici/personel-listesi")
+            
+            # _make_api_request başarılı olursa JSON objesini döner, hatayı kendisi fırlatır.
+            return response, None
+        
+        except ValueError as e:
+            # _make_api_request'in fırlattığı hataları yakalar (API/Bağlantı hataları)
+            error_message = str(e)
+            logger.error(f"Personel listesi alınırken hata: {error_message}")
             return None, error_message
-        except requests.exceptions.RequestException as e:
-            error_message = f"Personel listesi alınırken bağlantı hatası: {e}"
-            logger.error(error_message)
-            return None, error_message
+        except Exception as e:
+            logger.error(f"Personel listesi alınırken beklenmedik hata: {e}", exc_info=True)
+            return None, "Personel listesi alınırken beklenmedik bir hata oluştu."
 
-    def personel_olustur(self, kullanici_adi, sifre, rol="personel"):
+    def personel_olustur(self, data: dict):
         """Yeni bir personel oluşturmak için API'ye istek gönderir."""
         if not self.is_online or not self.access_token:
             logger.warning("Personel oluşturmak için çevrimiçi mod ve yetkilendirme gereklidir.")
-            return None, "Çevrimdışı veya yetkisiz."
+            # Hata mesajı döndürülürken, ValueError fırlatmak yerine uyumlu formatta döndürüldü.
+            return None, "Çevrimdışı veya yetkisiz. Personel oluşturulamaz."
         try:
-            headers = {"Authorization": f"Bearer {self.access_token}"}
-            payload = {
-                "kullanici_adi": kullanici_adi,
-                "sifre": sifre,
-                "rol": rol
-            }
-            response = self.session.post(f"{self.api_base_url}/yonetici/personel-olustur", json=payload, headers=headers)
-            response.raise_for_status()
-            return response.json(), None
-        except requests.exceptions.HTTPError as e:
-            error_message = f"Personel oluşturulamadı (HTTP {e.response.status_code}): {e.response.text}"
-            logger.error(error_message)
-            return None, error_message
-        except requests.exceptions.RequestException as e:
-            error_message = f"Personel oluşturulurken bağlantı hatası: {e}"
-            logger.error(error_message)
-            return None, error_message
+            # KRİTİK DÜZELTME: Artık data sözlüğü doğrudan alınıp API'ye gönderiliyor.
+            response = self._make_api_request(
+                method="POST", 
+                endpoint="/yonetici/personel-olustur",
+                data=data
+            )
+            # _make_api_request başarılı olursa JSON objesini döner, hatayı kendisi fırlatır.
+            return response, None
+            
+        except ValueError as e:
+            logger.error(f"Personel oluşturulurken API hatası: {e}")
+            return None, str(e)
+        except Exception as e:
+            logger.error(f"Personel oluşturulurken beklenmedik hata: {e}", exc_info=True)
+            return None, "Personel oluşturulurken beklenmedik bir hata oluştu."
+
+    def personel_detay_getir(self, personel_id: int):
+        """API'den tek bir personelin detayını çeker."""
+        if not self.is_online or not self.access_token:
+            return None, "Çevrimdışı modda detay çekilemez."
+        try:
+            # API'deki rotanın /kullanicilar/{id} olduğu varsayılıyor
+            response = self._make_api_request("GET", f"/kullanicilar/{personel_id}")
+            return response, None
+        except Exception as e:
+            logger.error(f"Personel ID {personel_id} detayları çekilemedi: {e}")
+            return None, str(e)
+
+    def personel_guncelle(self, personel_id: int, data: dict):
+        """Mevcut personeli günceller."""
+        if not self.is_online or not self.access_token:
+            return False, "Çevrimdışı veya yetkisiz."
+        try:
+            # API'deki rotanın /yonetici/personel-guncelle/{id} olduğu varsayılıyor
+            self._make_api_request("PUT", f"/yonetici/personel-guncelle/{personel_id}", data=data)
+            return True, "Personel başarıyla güncellendi."
+        except Exception as e:
+            logger.error(f"Personel güncelleme başarısız: {e}")
+            return False, str(e)
 
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.
