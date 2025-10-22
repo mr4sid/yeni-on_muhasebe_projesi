@@ -1,20 +1,32 @@
-# superadmin_panel.py dosyasının tam içeriği
+# superadmin_panel.py - TAMAMEN YENİ VE DÜZELTİLMİŞ VERSİYON
+# Tarih: 22 Ekim 2025
+# Düzeltmeler:
+# - Çoklu buton bağlantısı kaldırıldı
+# - showEvent() iyileştirildi
+# - Detaylı logging eklendi
+# - Her hücre için ayrı try-catch
+# - Yükleme kilit mekanizması
+
+import logging
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QMessageBox, QInputDialog, QComboBox, QHeaderView
 )
-import logging
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from datetime import datetime, date
+
 logger = logging.getLogger(__name__)
+
 class SuperAdminPaneli(QMainWindow):
     def __init__(self, db_manager):
         super().__init__()
         self.db_manager = db_manager
-        self.setWindowTitle("SUPERADMIN Yönetim Paneli")
+        self.setWindowTitle("🔐 SUPERADMIN - Firma Yönetim Paneli")
         self.setMinimumSize(1200, 700)
+        
+        logger.info("SuperAdminPaneli __init__ başladı")
         
         # Ana widget
         central_widget = QWidget()
@@ -32,45 +44,68 @@ class SuperAdminPaneli(QMainWindow):
         self.firma_tablosu.setColumnCount(8)
         self.firma_tablosu.setHorizontalHeaderLabels([
             "ID", "Firma Adı", "Firma No", "Lisans Başlangıç",
-            "Lisans Bitiş", "Kalan Gün", "Durum", "Kurucu ID" # Kullanıcı Sayısı şimdilik Kurucu ID olarak düzeltildi
+            "Lisans Bitiş", "Kalan Gün", "Durum", "Kurucu ID"
         ])
         self.firma_tablosu.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.firma_tablosu.setSelectionBehavior(QTableWidget.SelectRows)
         self.firma_tablosu.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.firma_tablosu)
         
-        # Butonlar
+        # Butonlar - DÜZELTME: Bağlantılar sadece _setup_connections içinde yapılacak
         buton_layout = QHBoxLayout()
         
         self.btn_yenile = QPushButton("🔄 Yenile")
-        buton_layout.addWidget(self.btn_yenile)  # ✅ Sadece ekle
-
+        buton_layout.addWidget(self.btn_yenile)
+        
         self.btn_lisans_uzat = QPushButton("⏱️ Lisans Uzat")
-        self.btn_lisans_uzat.clicked.connect(self.lisans_uzat)
         buton_layout.addWidget(self.btn_lisans_uzat)
         
         self.btn_askiya_al = QPushButton("⛔ Askıya Al")
-        self.btn_askiya_al.clicked.connect(self.askiya_al)
         buton_layout.addWidget(self.btn_askiya_al)
         
         self.btn_aktif_yap = QPushButton("✅ Aktif Yap")
-        self.btn_aktif_yap.clicked.connect(self.aktif_yap)
         buton_layout.addWidget(self.btn_aktif_yap)
         
         self.btn_detay = QPushButton("📊 Detay Görüntüle")
-        self.btn_detay.clicked.connect(self.detay_goruntule)
         buton_layout.addWidget(self.btn_detay)
         
         layout.addLayout(buton_layout)
         
-        self._setup_connections() 
+        # Buton bağlantılarını yap
+        self._setup_connections()
+        
+        # GÜVENLİK: İlk yükleme bayrağını başlangıçta ayarla
+        self._first_show_done = False
+        self._loading = False  # Yükleme kilit mekanizması
+        
+        logger.info("SuperAdminPaneli __init__ tamamlandı")
         
     def showEvent(self, event):
-        super().showEvent(event)
-        if not hasattr(self, '_first_show_done'):
-            self._first_show_done = True
-            logger.info("Firmalar yüklenecek...")
-            QTimer.singleShot(300, self.firmalari_yukle)
+        """Pencere gösterildikten SONRA veri yükle (sadece bir kez)."""
+        try:
+            super().showEvent(event)
+            logger.info(f"showEvent tetiklendi. _first_show_done={self._first_show_done}, _loading={self._loading}")
+            
+            # Sadece ilk gösterimde ve yükleme devam etmiyorsa
+            if not self._first_show_done and not self._loading:
+                self._first_show_done = True
+                self._loading = True
+                logger.info("Firmalar yüklenecek (QTimer ile 500ms sonra)...")
+                QTimer.singleShot(500, self._safe_load_firmalar)
+        except Exception as e:
+            logger.error(f"showEvent hatası: {e}", exc_info=True)
+    
+    def _safe_load_firmalar(self):
+        """Güvenli firma yükleme wrapper'i."""
+        try:
+            logger.info("_safe_load_firmalar çağrıldı")
+            self.firmalari_yukle()
+        except Exception as e:
+            logger.error(f"_safe_load_firmalar hatası: {e}", exc_info=True)
+            QMessageBox.critical(self, "Yükleme Hatası", f"Firmalar yüklenirken kritik hata:\n{e}")
+        finally:
+            self._loading = False
+            logger.info("Yükleme tamamlandı, kilit kaldırıldı")
 
     def _setup_connections(self):
         """Tüm buton bağlantılarını merkezi olarak yönetir."""
@@ -81,53 +116,105 @@ class SuperAdminPaneli(QMainWindow):
         self.btn_detay.clicked.connect(self.detay_goruntule)
 
     def firmalari_yukle(self):
-        """SUPERADMIN API'sinden tüm firmaları çeker ve tabloya yükler. (SADECE GÜVENLİ VERİ GÖSTERİMİ)"""
-        self.firma_tablosu.setRowCount(0)
-        
+        """SUPERADMIN API'sinden tüm firmaları çeker ve tabloya yükler."""
         try:
-            # API çağrısı
-            response = self.db_manager.api_get("/superadmin/firmalar")
+            logger.info("Firmalar yüklenmeye başlanıyor...")
+            self.firma_tablosu.setRowCount(0)
             
+            # API çağrısı
+            logger.info("API'ye istek gönderiliyor: /superadmin/firmalar")
+            response = self.db_manager.api_get("/superadmin/firmalar")
+            logger.info(f"API yanıtı alındı: {type(response)}")
+            
+            # Hata kontrolü
             if isinstance(response, dict) and "error" in response:
                 error_msg = response.get('detail', 'Bilinmeyen API Hatası')
-                QMessageBox.critical(self, "API Hata", f"Firmalar yüklenemedi. Detay: {error_msg}")
+                logger.error(f"API hatası: {error_msg}")
+                QMessageBox.warning(self, "API Hata", f"Firmalar yüklenemedi:\n{error_msg}")
                 return
             
+            # Liste kontrolü
             if not isinstance(response, list):
-                 QMessageBox.critical(self, "Hata", "API'den beklenmeyen veri formatı (Liste bekleniyordu).")
-                 return
-                 
-            firmalar = response 
+                logger.error(f"Beklenmeyen veri formatı: {type(response)}")
+                QMessageBox.warning(self, "Hata", "API'den beklenmeyen veri formatı.")
+                return
+            
+            logger.info(f"{len(response)} firma bulundu")
+            firmalar = response
+            
+            # Boş liste kontrolü
+            if len(firmalar) == 0:
+                logger.warning("Firma listesi boş")
+                QMessageBox.information(self, "Bilgi", "Hiç firma kaydı bulunamadı.")
+                return
+            
+            # Tablo satır sayısını ayarla
             self.firma_tablosu.setRowCount(len(firmalar))
+            logger.info(f"Tablo {len(firmalar)} satıra ayarlandı")
             
+            # Firmaları tabloya ekle
             for row, firma in enumerate(firmalar):
-                
-                # KRİTİK GÜVENLİK DÜZELTMESİ: Tüm dinamik tarih hesaplamaları ve renklendirmeler kaldırıldı.
-                # Yalnızca ham string verisini atıyoruz. Çökme olmazsa sorun dinamik koddaydı.
-                
-                self.firma_tablosu.setItem(row, 0, QTableWidgetItem(str(firma.get("id", "N/A"))))
-                self.firma_tablosu.setItem(row, 1, QTableWidgetItem(firma.get("unvan", "N/A")))
-                self.firma_tablosu.setItem(row, 2, QTableWidgetItem(firma.get("firma_no", "N/A")))
-                
-                # SADECE HAM TARİH STRING'İ
-                self.firma_tablosu.setItem(row, 3, QTableWidgetItem(str(firma.get("lisans_baslangic_tarihi", "N/A"))))
-                self.firma_tablosu.setItem(row, 4, QTableWidgetItem(str(firma.get("lisans_bitis_tarihi", "N/A"))))
-                
-                # KALAN GÜN: Hesaplama kaldırıldı, sadece durum stringi eklendi
-                self.firma_tablosu.setItem(row, 5, QTableWidgetItem("N/A (Hesap Kaldırıldı)")) 
-                
-                # DURUM: Renklendirme kaldırıldı, sadece durum stringi eklendi
-                self.firma_tablosu.setItem(row, 6, QTableWidgetItem(firma.get("lisans_durum", "N/A")))
-                
-                # Kurucu ID
-                self.firma_tablosu.setItem(row, 7, QTableWidgetItem(str(firma.get("kurucu_personel_id", "N/A"))))
-
-        # Bu try/except bloğu, her ihtimale karşı UI kilitlenmesini engellemek için korunur.
-        except Exception as e:
-            QMessageBox.critical(self, "Kritik UI Hata (Geri Düzeltme)", f"Veri atama sırasında hata: {e}")
+                try:
+                    logger.debug(f"Firma {row+1}/{len(firmalar)} işleniyor...")
+                    
+                    # GÜVENLİ VERİ ATAMA - Her hücre için ayrı try-catch
+                    try:
+                        self.firma_tablosu.setItem(row, 0, QTableWidgetItem(str(firma.get("id", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"ID atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 0, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 1, QTableWidgetItem(str(firma.get("unvan", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Unvan atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 1, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 2, QTableWidgetItem(str(firma.get("firma_no", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Firma no atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 2, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 3, QTableWidgetItem(str(firma.get("lisans_baslangic_tarihi", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Lisans başlangıç atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 3, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 4, QTableWidgetItem(str(firma.get("lisans_bitis_tarihi", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Lisans bitiş atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 4, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 5, QTableWidgetItem("N/A"))
+                    except Exception as e:
+                        logger.error(f"Kalan gün atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 5, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 6, QTableWidgetItem(str(firma.get("lisans_durum", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Durum atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 6, QTableWidgetItem("ERROR"))
+                    
+                    try:
+                        self.firma_tablosu.setItem(row, 7, QTableWidgetItem(str(firma.get("kurucu_personel_id", "N/A"))))
+                    except Exception as e:
+                        logger.error(f"Kurucu ID atama hatası: {e}")
+                        self.firma_tablosu.setItem(row, 7, QTableWidgetItem("ERROR"))
+                    
+                except Exception as row_error:
+                    logger.error(f"Satır {row} işlenirken hata: {row_error}", exc_info=True)
+                    continue
             
-    # ... Diğer yardımcı metotlar (secili_firma_id_al, lisans_uzat, askiya_al, aktif_yap, detay_goruntule) 
-    # Talimat 4.2'deki tam içeriği yansıtmaktadır.
+            logger.info("Firmalar başarıyla yüklendi")
+            
+        except Exception as e:
+            logger.error(f"Firmalar yüklenirken kritik hata: {e}", exc_info=True)
+            QMessageBox.critical(self, "Kritik Hata", f"Firmalar yüklenirken hata oluştu:\n\n{str(e)}\n\nLütfen terminal loglarını kontrol edin.")
     
     def secili_firma_id_al(self):
         """Tabloda seçili olan firmanın ID'sini döndürür."""
@@ -156,11 +243,9 @@ class SuperAdminPaneli(QMainWindow):
             return
         
         try:
-            # KRİTİK DÜZELTME 1: POST isteği olmasına rağmen API Query parametreleri kullanıyor. 
-            # API'deki rota PUT olarak tanımlandığından, api_put kullanmak daha doğru.
             response = self.db_manager.api_put(
-                f"/superadmin/{firma_id}/lisans-uzat", # Rota ID içeriyor
-                params={"gun_ekle": uzatma_gun} # Query parametreleri 'params' ile gönderilir
+                f"/superadmin/{firma_id}/lisans-uzat",
+                params={"gun_ekle": uzatma_gun}
             )
             
             if response and "unvan" in response: 
@@ -188,7 +273,6 @@ class SuperAdminPaneli(QMainWindow):
             return
         
         try:
-            # KRİTİK DÜZELTME 2: Query parametresi 'params' ile gönderilir.
             response = self.db_manager.api_put(
                 f"/superadmin/{firma_id}/durum-degistir",
                 params={"yeni_durum": "ASKIDA"}
@@ -210,7 +294,6 @@ class SuperAdminPaneli(QMainWindow):
             return
         
         try:
-            # KRİTİK DÜZELTME 3: Query parametresi 'params' ile gönderilir.
             response = self.db_manager.api_put(
                 f"/superadmin/{firma_id}/durum-degistir",
                 params={"yeni_durum": "AKTIF"}
@@ -232,31 +315,29 @@ class SuperAdminPaneli(QMainWindow):
             return
         
         try:
-            # Talimat 4.3'te ekleyeceğimiz api_get metodu kullanılır
             response = self.db_manager.api_get(f"/superadmin/{firma_id}/detay")
             
             if not response or "firma_detay" not in response:
-                QMessageBox.critical(self, "Hata", "Firma detayları yüklenemedi. API hatası veya boş yanıt.")
+                QMessageBox.critical(self, "Hata", "Firma detayları yüklenemedi.")
                 return
             
             detay = response['firma_detay']
             detay_mesaj = f"""
-            Firma ID: {detay.get('id')}
-            Firma Adı: {detay.get('unvan')}
-            Firma No: {detay.get('firma_no')}
-            Veritabanı: {detay.get('db_adi')}
-            
-            Lisans Başlangıç: {detay.get('lisans_baslangic_tarihi')}
-            Lisans Bitiş: {detay.get('lisans_bitis_tarihi')}
-            Kalan Gün: {response.get('kalan_gun')} gün
-            Durum: {detay.get('lisans_durum')}
-            
-            Oluşturulma Tarihi: {detay.get('olusturma_tarihi').split('T')[0] if detay.get('olusturma_tarihi') else 'N/A'}
-            Kullanıcı Sayısı: {response.get('kullanici_sayisi')}
-            Kurucu Personel ID: {detay.get('kurucu_personel_id')}
+Firma ID: {detay.get('id')}
+Firma Adı: {detay.get('unvan')}
+Firma No: {detay.get('firma_no')}
+Veritabanı: {detay.get('db_adi')}
+
+Lisans Başlangıç: {detay.get('lisans_baslangic_tarihi')}
+Lisans Bitiş: {detay.get('lisans_bitis_tarihi')}
+Lisans Durum: {detay.get('lisans_durum')}
+
+Kurucu Personel ID: {detay.get('kurucu_personel_id')}
+Oluşturma Tarihi: {detay.get('olusturma_tarihi')}
             """
             
             QMessageBox.information(self, "Firma Detayları", detay_mesaj)
         
         except Exception as e:
-            QMessageBox.critical(self, "Hata", f"Detaylar görüntülenirken kritik hata oluştu: {e}")
+            QMessageBox.critical(self, "Hata", f"Detaylar görüntülenirken hata oluştu: {e}")
+
