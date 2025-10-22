@@ -7902,16 +7902,12 @@ class GirisEkrani(QDialog):
                 # SUPERADMIN KONTROLÜ - Rol kontrolu string olarak yapılıyor
                 if result.get("rol") == "SUPERADMIN":
                     try:
-                        logger.info("SUPERADMIN girişi tespit edildi, panel açılıyor...")
-                        QMessageBox.information(self, "SUPERADMIN Girişi", f"Hoş geldiniz, {result.get('ad_soyad')}!")
-                        
-                        # Import'u burada yap (circular import'u önlemek için)
+                        logger.info("SUPERADMIN girişi tespit edildi...")
                         from superadmin_panel import SuperAdminPaneli
                         
-                        # Panel oluştur ve göster
                         logger.info("SuperAdminPaneli oluşturuluyor...")
                         self.superadmin_paneli = SuperAdminPaneli(self.db)
-                        logger.info("SuperAdminPaneli oluşturuldu, gösteriliyor...")
+                        logger.info("SuperAdminPaneli gösteriliyor...")
                         
                         self.superadmin_paneli.show()
                         logger.info("SuperAdminPaneli gösterildi")
@@ -7919,8 +7915,8 @@ class GirisEkrani(QDialog):
                         self.reject()
                         return
                     except Exception as panel_error:
-                        logger.error(f"SUPERADMIN paneli açılırken hata: {panel_error}", exc_info=True)
-                        QMessageBox.critical(self, "Panel Hatası", f"SUPERADMIN paneli açılamadı:\n\n{str(panel_error)}\n\nLütfen terminal loglarını kontrol edin.")
+                        logger.error(f"Panel hatası: {panel_error}", exc_info=True)
+                        QMessageBox.critical(self, "Panel Hatası", f"...")
                         return
 
                 # Diğer Roller (ADMIN, YONETICI, PERSONEL)

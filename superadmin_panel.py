@@ -4,10 +4,11 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QMessageBox, QInputDialog, QComboBox, QHeaderView
 )
+import logging
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from datetime import datetime, date
-
+logger = logging.getLogger(__name__)
 class SuperAdminPaneli(QMainWindow):
     def __init__(self, db_manager):
         super().__init__()
@@ -65,9 +66,11 @@ class SuperAdminPaneli(QMainWindow):
         self._setup_connections() 
         
     def showEvent(self, event):
-        """Pencere gösterildikten SONRA veri yükle."""
         super().showEvent(event)
-        QTimer.singleShot(200, self.firmalari_yukle)
+        if not hasattr(self, '_first_show_done'):
+            self._first_show_done = True
+            logger.info("Firmalar yüklenecek...")
+            QTimer.singleShot(300, self.firmalari_yukle)
 
     def _setup_connections(self):
         """Tüm buton bağlantılarını merkezi olarak yönetir."""
