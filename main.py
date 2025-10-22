@@ -928,25 +928,24 @@ if __name__ == "__main__":
 
     # Uygulamanın ana olay döngüsünü başlatın
     if login_screen.exec() == QDialog.Accepted:
-        # Eğer login başarılıysa, ana pencereyi oluşturup gösterin
-        
-        # Kritik Kontrol: Eğer user_data bir sözlük değilse, App'i başlatmadan önce hata ver.
         user_data = login_data["user_data"]
-        if not isinstance(user_data, dict) or not user_data:
-            QMessageBox.critical(None, "Kritik Hata", "Kullanıcı verisi alınamadı. Uygulama kapatılıyor.")
-            sys.exit(1)
         
-        main_window = App(user_data)
-        db_manager_login.app = main_window 
-        
-        main_window.setWindowState(Qt.WindowMaximized)
-        main_window.show()
-        
-        # UI açıldıktan hemen sonra, yerel verileri yüklüyor ve senkronizasyonu arka planda başlatıyor.
-        main_window._initial_load_data() # 1. UI'ı anında yerel verilerle doldur
-        main_window._start_background_sync() # 2. Ağ işlemini arka planda başlat
-
-        sys.exit(app.exec())
+        # SUPERADMIN KONTROLÜ
+        if user_data.get("rol") == "SUPERADMIN":
+            logger.info("SUPERADMIN girişi tespit edildi, panel açılıyor...")
+            from superadmin_panel import SuperAdminPaneli
+            
+            superadmin_window = SuperAdminPaneli(db_manager_login)
+            superadmin_window.show()
+            logger.info("SUPERADMIN paneli açıldı, event loop başlatılıyor...")
+            
+            sys.exit(app.exec())
+        else:
+            # Diğer roller için ana pencereyi aç
+            main_window = App(user_data)
+            main_window.show()
+            
+            sys.exit(app.exec())
     else:
         # Eğer login iptal edildiyse (kullanıcı kapattıysa), uygulamadan çıkın
         sys.exit(0)
