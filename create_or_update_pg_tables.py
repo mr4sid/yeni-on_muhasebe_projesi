@@ -4,9 +4,9 @@ import logging
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-
+from datetime import date, timedelta
 # Gerekli tüm master modelleri ve şifreleme fonksiyonu import edilir
-from api.modeller import Base, Kullanici, Firma, Ayarlar
+from api.modeller import Base, Kullanici, Firma, Ayarlar, LisansDurumEnum, RolEnum
 from api.guvenlik import get_password_hash
 
 # Loglama ayarları
@@ -72,6 +72,9 @@ def setup_initial_database_and_user():
         logger.info("Varsayılan Kurucu Personel ve Firma doğrudan veritabanına ekleniyor...")
         default_email = "admin@master.com"
         
+        lisans_baslangic = date.today()
+        lisans_bitis = lisans_baslangic + timedelta(days=365)
+
         if not db.query(Kullanici).filter_by(email=default_email).first():
             hashed_password = get_password_hash("755397")
             
@@ -90,7 +93,10 @@ def setup_initial_database_and_user():
                 unvan="Master Yonetim Firmasi",
                 db_adi="tenant_master_yonetim_firmasi",
                 firma_no="mv1000",
-                kurucu_personel_id=default_user.id
+                kurucu_personel_id=default_user.id,
+                lisans_baslangic_tarihi=lisans_baslangic,
+                lisans_bitis_tarihi=lisans_bitis,
+                lisans_durum=LisansDurumEnum.AKTIF
             )
             db.add(default_firma)
             db.flush()
@@ -100,8 +106,17 @@ def setup_initial_database_and_user():
             db.commit()
             logger.info(f"Varsayılan Master Kurucu Personel ({default_email}) ve Firması başarıyla eklendi.")
         else:
-            logger.warning(f"Kullanıcı '{default_email}' zaten mevcut. Ekleme adımı atlandı.")
-            
+            default_user = db.query(Kullanici).filter_by(email=default_email).first()
+            default_firma = db.query(Firma).filter_by(kurucu_personel_id=default_user.id).first()
+            if default_firma:
+                default_firma.lisans_baslangic_tarihi = lisans_baslangic
+                default_firma.lisans_bitis_tarihi = lisans_bitis
+                default_firma.lisans_durum = LisansDurumEnum.AKTIF
+                db.commit()
+                logger.warning(f"Kullanıcı '{default_email}' mevcut. Lisans bilgileri yeniden 1 yıl AKTIF olarak ayarlandı.")
+            else:
+                logger.warning(f"Kullanıcı '{default_email}' mevcut ancak firma kaydı bulunamadı. Lütfen kontrol edin.")
+    
     except Exception as e:
         logger.error(f"Tablo veya kullanıcı oluşturma sırasında hata oluştu: {e}")
         db.rollback()

@@ -93,7 +93,7 @@ def add_default_user_data(db: Session, kullanici_id_master: int):
             email=master_user.email,
             sifre_hash=master_user.sifre_hash,
             telefon=master_user.telefon,
-            rol="admin", # ROL KESİN OLARAK ADMIN OLARAK ATANDI
+            rol=modeller.RolEnum.ADMIN,
             aktif=True
         )
         db.add(tenant_user)

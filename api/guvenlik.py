@@ -9,6 +9,8 @@ from . import modeller, semalar
 from .config import settings
 from typing import Optional
 from .database_core import SessionLocal_master
+import logging
+logger = logging.getLogger(__name__)
 
 def get_master_db():
     db = SessionLocal_master()
@@ -94,3 +96,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
         
     return user
+
+def get_current_user_superadmin(current_user: modeller.KullaniciRead = Depends(get_current_user)):
+    if current_user.rol != modeller.RolEnum.SUPERADMIN:
+        logger.warning(f"SUPERADMIN yetkisi olmayan kullanıcı erişim denemesi: {current_user.email} (Rol: {current_user.rol})")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sadece SUPERADMIN yetkilidir."
+        )
+    return current_user

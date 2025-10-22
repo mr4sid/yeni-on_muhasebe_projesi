@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from datetime import timedelta, date
 from typing import List, Optional
 from ..guvenlik import get_password_hash, get_current_user
 from .. import modeller, guvenlik, veritabani
@@ -81,11 +82,17 @@ def firma_olustur(firma_data: modeller.FirmaOlustur, db: Session = Depends(get_m
         # Tenant DB oluştur
         create_tenant_db_and_tables(tenant_db_name)
 
+        lisans_baslangic = date.today()
+        lisans_bitis = lisans_baslangic + timedelta(days=7)
+
         # ✅ GÜNCELLEME: firma_no alanı eklendi
         yeni_firma = modeller.Firma(
             unvan=firma_data.firma_unvani, 
             db_adi=tenant_db_name,
-            firma_no=firma_no  # ← EKLENEN ALAN
+            firma_no=firma_no,
+            lisans_baslangic_tarihi=lisans_baslangic,
+            lisans_bitis_tarihi=lisans_bitis,
+            lisans_durum=modeller.LisansDurumEnum.DENEME
         )
         db.add(yeni_firma)
         db.flush()
@@ -110,7 +117,7 @@ def firma_olustur(firma_data: modeller.FirmaOlustur, db: Session = Depends(get_m
             email=firma_data.yonetici_email,
             sifre_hash=hashed_sifre,
             telefon=firma_data.yonetici_telefon,
-            rol="YONETICI",
+            rol=modeller.RolEnum.ADMIN,
             firma_id=yeni_firma.id
         )
         db.add(yeni_kullanici)
@@ -332,8 +339,8 @@ def personel_listele_endpoint(
     db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    yetkili_roller = ['ADMIN', 'YONETICI', 'SUPERADMIN']
-    if current_user.rol.upper() not in yetkili_roller:
+    yetkili_roller = [modeller.RolEnum.ADMIN, modeller.RolEnum.YONETICI, modeller.RolEnum.SUPERADMIN]
+    if current_user.rol not in yetkili_roller:
         raise HTTPException(status_code=403, detail="Yalnızca yetkili kullanıcılar personel listesini görebilir.")
         
     # Tenant DB kullanıldığı için zaten filtrelenmiş kullanıcılar gelir
@@ -349,8 +356,8 @@ def personel_guncelle_endpoint(
     db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    yetkili_roller = ['ADMIN', 'YONETICI', 'SUPERADMIN']
-    if current_user.rol.upper() not in yetkili_roller:
+    yetkili_roller = [modeller.RolEnum.ADMIN, modeller.RolEnum.YONETICI, modeller.RolEnum.SUPERADMIN]
+    if current_user.rol not in yetkili_roller:
         raise HTTPException(status_code=403, detail="Yalnızca yetkili kullanıcılar personel güncelleyebilir.")
 
     if personel_id == current_user.id:
@@ -360,10 +367,18 @@ def personel_guncelle_endpoint(
     
     if not personel:
         raise HTTPException(status_code=404, detail="Personel bulunamadı.")
+    
+    # ADMIN (ID=1) hesabının rolünü değiştirmeyi engelle (Talimat 1.5 - Görev 2)
+    if personel_id == 1 and personel_guncelle.rol and personel_guncelle.rol != modeller.RolEnum.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Kurucu ADMIN hesabının rolü değiştirilemez."
+        )
         
     update_data = personel_guncelle.model_dump(exclude_unset=True)
     
-    if 'rol' in update_data and current_user.rol.upper() not in ['SUPERADMIN', 'YONETICI']:
+    # ROL KONTROLÜ GÜNCELLENDİ (Talimat 1.4)
+    if 'rol' in update_data and current_user.rol not in [modeller.RolEnum.SUPERADMIN, modeller.RolEnum.YONETICI]:
         del update_data['rol']
 
     for key, value in update_data.items():
@@ -385,12 +400,20 @@ def personel_sil_endpoint(
     db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    yetkili_roller = ['ADMIN', 'YONETICI', 'SUPERADMIN']
-    if current_user.rol.upper() not in yetkili_roller:
+    # ROL KONTROLÜ GÜNCELLENDİ (Talimat 1.4)
+    yetkili_roller = [modeller.RolEnum.ADMIN, modeller.RolEnum.YONETICI, modeller.RolEnum.SUPERADMIN]
+    if current_user.rol not in yetkili_roller:
         raise HTTPException(status_code=403, detail="Yalnızca yetkili kullanıcılar personel silebilir.")
 
     if personel_id == current_user.id:
         raise HTTPException(status_code=400, detail="Aktif olarak kullandığınız hesabı silemezsiniz.")
+
+    # ADMIN (ID=1) hesabını koruma (Talimat 1.5 - Görev 1)
+    if personel_id == 1:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Kurucu ADMIN hesabı silinemez."
+        )
         
     personel = db.query(modeller.Kullanici).filter(modeller.Kullanici.id == personel_id).first()
     
@@ -409,8 +432,9 @@ def personel_olustur_endpoint(
     db: Session = Depends(veritabani.get_db),
     current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
 ):
-    yetkili_roller = ['ADMIN', 'YONETICI', 'SUPERADMIN']
-    if current_user.rol.upper() not in yetkili_roller:
+    # ROL KONTROLÜ GÜNCELLENDİ (Talimat 1.4)
+    yetkili_roller = [modeller.RolEnum.ADMIN, modeller.RolEnum.YONETICI, modeller.RolEnum.SUPERADMIN]
+    if current_user.rol not in yetkili_roller:
         raise HTTPException(status_code=403, detail="Yalnızca yetkili kullanıcılar personel oluşturabilir.")
 
     # 1. Kullanıcının zaten var olup olmadığını kontrol et (Tenant DB üzerinde)

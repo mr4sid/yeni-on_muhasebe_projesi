@@ -1,10 +1,10 @@
 # api/rotalar/dogrulama.py dosyasının Dosyasının tam ve güncel içeriğidir.
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload 
-from datetime import timedelta
+from datetime import timedelta, date
 from sqlalchemy.exc import IntegrityError
 import logging
-
+import uuid
 from .. import modeller, semalar
 from ..veritabani import get_master_db, get_tenant_engine, get_master_engine, get_tenant_session_by_name
 from ..guvenlik import create_access_token, verify_password, get_password_hash
@@ -38,7 +38,7 @@ def _add_default_tenant_data(db: Session, olusturan_kullanici_id: int):
             soyad=kurucu_kullanici.soyad,
             email=kurucu_kullanici.email,
             sifre_hash=kurucu_kullanici.sifre_hash,
-            rol="yonetici"
+            rol=modeller.RolEnum.ADMIN
             # firma_id BURADAN KALDIRILDI!
         )
         db.add(tenant_ilk_kullanici)
@@ -89,6 +89,32 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
     if not user.firma or not user.firma.db_adi:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Kullanıcının Tenant/Firma bilgisi eksik.")
 
+    # LİSANS KONTROLÜ
+    if user.firma:
+        bugün = date.today()
+        
+        # Lisans durumunu güncelle (otomatik)
+        # Lisans bitiş tarihi geçmişse ve askıda değilse, süresi bitmiş olarak işaretle
+        if user.firma.lisans_bitis_tarihi < bugün and user.firma.lisans_durum != modeller.LisansDurumEnum.ASKIDA:
+            user.firma.lisans_durum = modeller.LisansDurumEnum.SURESI_BITMIS
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Lisans durumu güncellenirken hata: {e}")
+        
+        # Lisans süresi bittiyse veya askıdaysa girişi engelle
+        if user.firma.lisans_durum in [modeller.LisansDurumEnum.SURESI_BITMIS, modeller.LisansDurumEnum.ASKIDA]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Lisans süreniz sona erdi. Lütfen lisansınızı yenileyiniz. (Son kullanım tarihi: {user.firma.lisans_bitis_tarihi})"
+            )
+        
+        # Lisans süresi yaklaşıyorsa uyarı (3 gün ve altı)
+        kalan_gun = (user.firma.lisans_bitis_tarihi - bugün).days
+        if kalan_gun <= 3 and user.firma.lisans_durum == modeller.LisansDurumEnum.DENEME:
+            logger.warning(f"Firma {user.firma.unvan} için lisans süresi {kalan_gun} gün içinde dolacak.")
+
     tenant_db_name = user.firma.db_adi
     firma_adi = user.firma.unvan
     firma_no = user.firma.firma_no
@@ -125,11 +151,11 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "tenant_db": tenant_db_name, "rol": user.rol}, 
+        data={"sub": user.email, "tenant_db": tenant_db_name, "rol": user.rol, "firma_no": firma_no},
         expires_delta=access_token_expires
     )
 
-    # YENİ EKLENEN KISIM: ad ve soyad birleştiriliyor.
+    # ad ve soyad birleştiriliyor.
     ad_soyad = f"{user.ad} {user.soyad}".strip()
 
     return {
@@ -142,7 +168,7 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
         "firma_adi": firma_adi,
         "firma_no": firma_no,
         "tenant_db_name": tenant_db_name,
-        "ad_soyad": ad_soyad  # YENİ EKLENDİ
+        "ad_soyad": ad_soyad
     }
 
 @router.post("/register", response_model=modeller.KullaniciRead)
@@ -151,7 +177,7 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
     # Mevcut kullanıcı veya firma adı kontrolü
     if db.query(modeller.Kullanici).filter(modeller.Kullanici.email == user_create.email).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="E-posta zaten mevcut.")
-    if db.query(modeller.Firma).filter(modeller.Firma.firma_adi == user_create.firma_adi).first():
+    if hasattr(user_create, 'firma_adi') and db.query(modeller.Firma).filter(modeller.Firma.unvan == user_create.firma_adi).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Firma adı zaten mevcut.")
 
     hashed_password = get_password_hash(user_create.sifre)
@@ -165,7 +191,8 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
     )
     
     # Firma adından güvenli bir veritabanı adı oluştur
-    tenant_db_name = f"tenant_{user_create.firma_adi}".lower().replace(' ', '_').replace('ı', 'i').replace('ö', 'o').replace('ü', 'u').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g')
+    firma_unvani = getattr(user_create, 'firma_adi', f"Firma_{uuid.uuid4().hex[:4]}")
+    tenant_db_name = f"tenant_{firma_unvani}".lower().replace(' ', '_').replace('ı', 'i').replace('ö', 'o').replace('ü', 'u').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g')
     
     master_engine = get_master_engine()
     
@@ -185,11 +212,23 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
     try:
         db.add(db_user)
         db.flush() 
-        
+
+        # Benzersiz firma numarası oluştur (yonetici.py'den kopyalandı)
+        firma_no = f"F{uuid.uuid4().hex[:8].upper()}"
+        while db.query(modeller.Firma).filter(modeller.Firma.firma_no == firma_no).first():
+            firma_no = f"F{uuid.uuid4().hex[:8].upper()}"
+
+        # Lisans tarihleri hesapla (7 günlük deneme)
+        lisans_baslangic = date.today()
+        lisans_bitis = lisans_baslangic + timedelta(days=7)
+
         db_firma = modeller.Firma(
             firma_adi=user_create.firma_adi,
             tenant_db_name=tenant_db_name,
-            kurucu_personel_id=db_user.id
+            kurucu_personel_id=db_user.id,
+            lisans_baslangic_tarihi=lisans_baslangic,
+            lisans_bitis_tarihi=lisans_bitis,
+            lisans_durum=modeller.LisansDurumEnum.DENEME
         )
         db.add(db_firma)
         db_user.firma_id = db_firma.id
@@ -212,7 +251,8 @@ def register_user(user_create: modeller.KullaniciCreate, db: Session = Depends(g
         
         db.refresh(db_user)
         user_read = modeller.KullaniciRead.model_validate(db_user, from_attributes=True)
-        user_read.firma_adi = db_firma.firma_adi
+        user_read.firma_adi = db_firma.unvan
+        user_read.firma_no = db_firma.firma_no
         return user_read
 
     except Exception as e:

@@ -20,7 +20,7 @@ from .rotalar import (
     dogrulama, musteriler, tedarikciler, stoklar,
     kasalar_bankalar, cari_hareketler,
     gelir_gider, nitelikler, sistem, raporlar, yedekleme, kullanicilar,
-    yonetici
+    yonetici,superadmin
 )
 from .rotalar.siparis_faturalar import siparisler_router, faturalar_router 
 
@@ -107,6 +107,7 @@ app.include_router(cari_hareketler.router, tags=["Cari Hareketler"])
 app.include_router(gelir_gider.router, tags=["Gelir ve Giderler"])
 app.include_router(nitelikler.router, tags=["Nitelikler"])
 app.include_router(sistem.router, tags=["Sistem"])
+app.include_router(superadmin.router, tags=["SUPERADMIN Yönetimi"])
 app.include_router(raporlar.router, tags=["Raporlar"])
 app.include_router(yedekleme.router, tags=["Yedekleme"])
 app.include_router(yonetici.router, tags=["Yönetici"])

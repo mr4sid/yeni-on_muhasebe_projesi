@@ -11,7 +11,6 @@ from sqlalchemy import (
 )
 from pydantic import field_validator
 import re
-from .database_core import Base
 from sqlalchemy.orm import relationship, declarative_base, foreign
 
 # --- ENUM TANIMLARI ---
@@ -25,8 +24,9 @@ class SiparisTuruEnum(str, enum.Enum): SATIS_SIPARIS = "SATIŞ_SIPARIS"; ALIS_SI
 class SiparisDurumEnum(str, enum.Enum): BEKLEMEDE = "BEKLEMEDE"; TAMAMLANDI = "TAMAMLANDI"; KISMİ_TESLIMAT = "KISMİ_TESLİMAT"; IPTAL_EDILDI = "İPTAL_EDİLDİ"; FATURALASTIRILDI = "FATURALAŞTIRILDI"
 class KaynakTipEnum(str, enum.Enum): FATURA = "FATURA"; SIPARIS = "SIPARIS"; GELIR_GIDER = "GELIR_GIDER"; MANUEL = "MANUEL"; TAHSILAT = "TAHSİLAT"; ODEME = "ÖDEME"; VERESIYE_BORC_MANUEL = "VERESİYE_BORÇ_MANUEL"
 class GelirGiderTipEnum(str, enum.Enum): GELİR = "GELİR"; GİDER = "GİDER"
-
-Base = declarative_base()
+class RolEnum(str, enum.Enum): SUPERADMIN = "SUPERADMIN"; ADMIN = "ADMIN";YONETICI = "YONETICI"; PERSONEL = "PERSONEL"      
+class LisansDurumEnum(str, enum.Enum): DENEME = "DENEME"; AKTIF = "AKTIF"; SURESI_BITMIS = "SURESI_BITMIS"; ASKIDA = "ASKIDA"
+Base = declarative_base()      
 
 class VersionedMixin:
     """
@@ -57,7 +57,11 @@ class Firma(Base):
     firma_no = Column(String(50), unique=True, nullable=False, index=True)
     kurucu_personel_id = Column(Integer, ForeignKey('kullanicilar.id')) 
     
-    # KRİTİK DÜZELTME 1: Bir Firma -> Tüm Personel (Yabancı Anahtar: Kullanici.firma_id)
+    lisans_baslangic_tarihi = Column(Date, nullable=False)
+    lisans_bitis_tarihi = Column(Date, nullable=False)
+    lisans_durum = Column(Enum(LisansDurumEnum), nullable=False, default=LisansDurumEnum.DENEME)
+    olusturma_tarihi = Column(DateTime, server_default=func.now())
+    
     kullanicilar = relationship(
         "Kullanici", 
         back_populates="firma", 
@@ -134,7 +138,7 @@ class Kullanici(VersionedMixin, Base):
     telefon = Column(String(20))
 
     firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True) 
-    rol = Column(String(50), default='kullanici')
+    rol = Column(Enum(RolEnum), nullable=False, default=RolEnum.PERSONEL)
     aktif = Column(Boolean, default=True)
     olusturma_tarihi = Column(DateTime, server_default=func.now())
     son_giris_tarihi = Column(DateTime, nullable=True)
@@ -160,10 +164,10 @@ class Kullanici(VersionedMixin, Base):
     siparisler = relationship("Siparis", back_populates="kullanici")
     master_ayarlar = relationship("Ayarlar", back_populates="kullanici")
     
-class FirmaRead(BaseOrmModel): id: int; firma_adi: str; tenant_db_name: str; olusturma_tarihi: datetime
+class FirmaRead(BaseOrmModel): id: int; unvan: str; db_adi: str; lisans_baslangic_tarihi: date; lisans_bitis_tarihi: date; lisans_durum: LisansDurumEnum; olusturma_tarihi: datetime
 
 # Kullanıcı Modelleri (Pydantic)
-class KullaniciBase(BaseOrmModel): ad: str; soyad: str; email: EmailStr; telefon: Optional[str] = None; rol: Optional[str] = "admin"; aktif: Optional[bool] = True
+class KullaniciBase(BaseOrmModel): ad: str; soyad: str; email: EmailStr; telefon: Optional[str] = None; rol: Optional[RolEnum] = RolEnum.PERSONEL; aktif: Optional[bool] = True
 
 class KullaniciCreate(KullaniciBase):
     sifre: str
@@ -187,7 +191,7 @@ class KullaniciUpdate(BaseModel):
     kullanici_adi: Optional[str] = None
     sifre: Optional[str] = None
     aktif: Optional[bool] = None
-    rol: Optional[str] = None
+    rol: Optional[RolEnum] = None
 
 class Token(BaseModel):
     access_token: str
@@ -1415,3 +1419,12 @@ class FirmaOlustur(BaseModel):
         if len(v) < 6:
             raise ValueError('Şifre en az 6 karakter olmalıdır')
         return v
+    
+class LisansDurumRead(BaseOrmModel):
+    firma_unvani: str
+    firma_no: str
+    lisans_baslangic_tarihi: date
+    lisans_bitis_tarihi: date
+    lisans_durum: LisansDurumEnum
+    kalan_gun: int
+    uyari: Optional[str] = None    

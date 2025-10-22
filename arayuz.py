@@ -246,63 +246,6 @@ class AnaSayfa(QWidget):
             self.lbl_toplam_tahsilat_degeri.setText("<b>Hata Oluştu</b>")
             self.lbl_toplam_odeme_degeri.setText("<b>Hata Oluştu</b>")
 
-#    def ciz_aylik_satis_alıs_grafik(self):
-#        """Aylık satış ve alış grafiklerini çizer."""
-#        try:
-#            fig = self.aylik_grafik_canvas.figure
-#            fig.clear()
-#            ax = fig.add_subplot(111)
-#
-#            simdi = datetime.now()
-#            gecmis_bir_yil = simdi - timedelta(days=365)
-#            
-#            aylik_satis_ozeti = self.db.get_monthly_sales_summary(
-#                baslangic_tarihi=gecmis_bir_yil.strftime('%Y-%m-%d'),
-#                bitis_tarihi=simdi.strftime('%Y-%m-%d')
-#            )
-#            
-#            if not isinstance(aylik_satis_ozeti, list):
-#                aylik_satis_ozeti = []
-#            
-#            aylar = [item.get('ay_adi', '-') for item in aylik_satis_ozeti]
-#            satislar = [item.get('toplam_satis', 0) for item in aylik_satis_ozeti]
-#            alislar = [item.get('toplam_alis', 0) for item in aylik_satis_ozeti]
-#            
-#            if not aylar:
-#                ax.text(0.5, 0.5, "Grafik verisi bulunamadı.", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=12)
-#            else:
-#                x = np.arange(len(aylar))
-#                width = 0.35
-#                
-#                rects1 = ax.bar(x - width/2, satislar, width, label='Satış', color='green')
-#                rects2 = ax.bar(x + width/2, alislar, width, label='Alış', color='red')
-#
-#                ax.set_ylabel('Tutar (TL)')
-#                ax.set_title('Aylık Satış ve Alış Özeti')
-#                ax.set_xticks(x)
-#                ax.set_xticklabels(aylar, rotation=45, ha="right")
-#                ax.legend()
-#                
-#                def autolabel(rects):
-#                    for rect in rects:
-#                        height = rect.get_height()
-#                        if height > 0:
-#                            ax.annotate(f'{height:,.0f}',
-#                                        xy=(rect.get_x() + rect.get_width() / 2, height),
-#                                        xytext=(0, 3),
-#                                        textcoords="offset points",
-#                                        ha='center', va='bottom', fontsize=8)
-#
-#                autolabel(rects1)
-#                autolabel(rects2)
-#
-#            fig.tight_layout()
-#            self.aylik_grafik_canvas.draw()
-#            
-#        except Exception as e:
-#            logger.error(f"Aylık satış/alış grafiği çizilirken hata: {e}", exc_info=True)
-#            self.app.set_status_message(f"Aylık grafik çizilirken hata: {e}", "red")
-
 class FinansalIslemlerSayfasi(QWidget): 
     def __init__(self, parent, db_manager, app_ref):
         super().__init__(parent)
@@ -7926,20 +7869,20 @@ class GirisEkrani(QDialog):
         
         try:
             if self.radio_yonetici.isChecked():
-                # --- YÖNETİCİ GİRİŞİ ---
+                # --- YÖNETİCİ / SUPERADMIN GİRİŞİ ---
                 email = self._entry_username.text()
                 if not email or not sifre:
                     QMessageBox.warning(self, "Hata", "Lütfen E-posta ve şifre giriniz.")
                     return
                 
-                # --- ÇÖZÜM BURADA: E-postayı config dosyasına kaydetme ---
+                # ... (mevcut config kaydetme kısmı) ...
                 from main import save_config, load_config
                 app_config = load_config()
                 app_config['last_username'] = email
                 save_config(app_config)
                 # --- ÇÖZÜM SONU ---
                 
-                # Mevcut yönetici doğrulama metodunu kullanıyoruz
+                # API çağrısı, dogrulama/login rotasına POST yapar
                 result = self.db.kullanici_dogrula(email, sifre)
 
             else:
@@ -7955,6 +7898,22 @@ class GirisEkrani(QDialog):
 
             # --- ORTAK SONUÇ DEĞERLENDİRME ---
             if isinstance(result, dict) and "access_token" in result:
+                
+                # KRİTİK DÜZELTME: Nokta (.) kaldırıldı.
+                from superadmin_panel import SuperAdminPaneli 
+                from api import modeller
+                
+                # SUPERADMIN KONTROLÜ (Talimat 4.1)
+                if result.get("rol") == modeller.RolEnum.SUPERADMIN.value:
+                    QMessageBox.information(self, "SUPERADMIN Girişi", f"Hoş geldiniz, {result.get('ad_soyad')}!")
+                    
+                    # self.db_manager yerine self.db kullanıldı (arayuz.py'deki objeye göre)
+                    self.superadmin_paneli = SuperAdminPaneli(self.db) 
+                    self.superadmin_paneli.show()
+                    self.reject() 
+                    return
+
+                # Diğer Roller (ADMIN, YONETICI, PERSONEL)
                 self.login_success.emit(result)
                 self.accept()
             else:

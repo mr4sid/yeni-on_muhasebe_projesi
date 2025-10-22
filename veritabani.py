@@ -2187,6 +2187,34 @@ class OnMuhasebe:
             logger.error(f"Personel güncelleme başarısız: {e}")
             return False, str(e)
 
+    def api_get(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """SUPERADMIN ve genel amaçlı GET istekleri için."""
+        try:
+            return self._make_api_request("GET", endpoint, params=params)
+        except ValueError as e:
+            # _make_api_request'ten gelen hatayı yakalar ve SuperAdminPaneli'nin beklediği sözlük formatına çevirir.
+            return {"error": "API Hatası", "detail": str(e)}
+        except Exception as e:
+            return {"error": "Genel Hata", "detail": str(e)}
+
+    def api_post(self, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """SUPERADMIN ve genel amaçlı POST istekleri için (Örn: Lisans Uzat)."""
+        try:
+            return self._make_api_request("POST", endpoint, data=data, params=params)
+        except ValueError as e:
+            return {"error": "API Hatası", "detail": str(e)}
+        except Exception as e:
+            return {"error": "Genel Hata", "detail": str(e)}
+
+    def api_put(self, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """SUPERADMIN ve genel amaçlı PUT istekleri için (Örn: Durum Değiştir)."""
+        try:
+            return self._make_api_request("PUT", endpoint, data=data, params=params)
+        except ValueError as e:
+            return {"error": "API Hatası", "detail": str(e)}
+        except Exception as e:
+            return {"error": "Genel Hata", "detail": str(e)}
+
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.
 def update_local_user_credentials(kullanici_id: int, email: str, sifre_hash: str, rol: str): 

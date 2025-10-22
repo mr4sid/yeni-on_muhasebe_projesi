@@ -4,7 +4,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, date
 from .. import modeller 
 from .. import veritabani
 from .. import guvenlik
@@ -333,3 +333,45 @@ def sync_data(
         response_data[name] = items_list
 
     return response_data
+
+@router.get("/lisans-durumu", response_model=modeller.LisansDurumRead, summary="Mevcut firmanın lisans ve kalan gün bilgisini döndürür.")
+def get_firma_lisans_durumu(
+    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
+    db: Session = Depends(veritabani.get_master_db) # Master DB'de Firma tablosuna erişim için
+):
+    # SUPERADMIN rolü bu bilgiyi görmesine gerek yok, sadece ADMIN/YONETICI/PERSONEL için.
+    if current_user.rol == modeller.RolEnum.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SUPERADMIN'in firma lisans takibi bu rotadan yapılmaz."
+        )
+        
+    firma_id = current_user.firma_id
+    if not firma_id:
+        raise HTTPException(status_code=404, detail="Kullanıcıya ait firma bilgisi bulunamadı.")
+        
+    firma = db.query(modeller.Firma).filter(modeller.Firma.id == firma_id).first()
+    
+    if not firma:
+        raise HTTPException(status_code=404, detail="Firma kaydı bulunamadı.")
+
+    bugün = date.today()
+    kalan_gun = (firma.lisans_bitis_tarihi - bugün).days
+    
+    uyari_mesaji = None
+    if firma.lisans_durum == modeller.LisansDurumEnum.DENEME and kalan_gun <= 3:
+        uyari_mesaji = f"UYARI: Deneme sürenizin bitmesine {kalan_gun} gün kaldı!"
+    elif firma.lisans_durum == modeller.LisansDurumEnum.SURESI_BITMIS:
+        uyari_mesaji = "LİSANS SÜRENİZ BİTMİŞTİR. Lütfen yenileyiniz."
+    elif firma.lisans_durum == modeller.LisansDurumEnum.ASKIDA:
+        uyari_mesaji = "LİSANSINIZ YÖNETİCİ TARAFINDAN ASKIYA ALINMIŞTIR."
+        
+    return {
+        "firma_unvani": firma.unvan,
+        "firma_no": firma.firma_no,
+        "lisans_baslangic_tarihi": firma.lisans_baslangic_tarihi,
+        "lisans_bitis_tarihi": firma.lisans_bitis_tarihi,
+        "lisans_durum": firma.lisans_durum,
+        "kalan_gun": kalan_gun,
+        "uyari": uyari_mesaji
+    }
