@@ -42,9 +42,8 @@ class SuperAdminPaneli(QMainWindow):
         buton_layout = QHBoxLayout()
         
         self.btn_yenile = QPushButton("🔄 Yenile")
-        self.btn_yenile.clicked.connect(self.firmalari_yukle)
-        buton_layout.addWidget(self.btn_yenile)
-        
+        buton_layout.addWidget(self.btn_yenile)  # ✅ Sadece ekle
+
         self.btn_lisans_uzat = QPushButton("⏱️ Lisans Uzat")
         self.btn_lisans_uzat.clicked.connect(self.lisans_uzat)
         buton_layout.addWidget(self.btn_lisans_uzat)
@@ -65,9 +64,11 @@ class SuperAdminPaneli(QMainWindow):
         
         self._setup_connections() 
         
-        # İlk yükleme (QTimer ile Gecikmeli Başlatma)
-        QTimer.singleShot(100, self.firmalari_yukle)
-    
+    def showEvent(self, event):
+        """Pencere gösterildikten SONRA veri yükle."""
+        super().showEvent(event)
+        QTimer.singleShot(200, self.firmalari_yukle)
+
     def _setup_connections(self):
         """Tüm buton bağlantılarını merkezi olarak yönetir."""
         self.btn_yenile.clicked.connect(self.firmalari_yukle)

@@ -7899,19 +7899,29 @@ class GirisEkrani(QDialog):
             # --- ORTAK SONUÇ DEĞERLENDİRME ---
             if isinstance(result, dict) and "access_token" in result:
                 
-                # KRİTİK DÜZELTME: Nokta (.) kaldırıldı.
-                from superadmin_panel import SuperAdminPaneli 
-                from api import modeller
-                
-                # SUPERADMIN KONTROLÜ (Talimat 4.1)
-                if result.get("rol") == modeller.RolEnum.SUPERADMIN.value:
-                    QMessageBox.information(self, "SUPERADMIN Girişi", f"Hoş geldiniz, {result.get('ad_soyad')}!")
-                    
-                    # self.db_manager yerine self.db kullanıldı (arayuz.py'deki objeye göre)
-                    self.superadmin_paneli = SuperAdminPaneli(self.db) 
-                    self.superadmin_paneli.show()
-                    self.reject() 
-                    return
+                # SUPERADMIN KONTROLÜ - Rol kontrolu string olarak yapılıyor
+                if result.get("rol") == "SUPERADMIN":
+                    try:
+                        logger.info("SUPERADMIN girişi tespit edildi, panel açılıyor...")
+                        QMessageBox.information(self, "SUPERADMIN Girişi", f"Hoş geldiniz, {result.get('ad_soyad')}!")
+                        
+                        # Import'u burada yap (circular import'u önlemek için)
+                        from superadmin_panel import SuperAdminPaneli
+                        
+                        # Panel oluştur ve göster
+                        logger.info("SuperAdminPaneli oluşturuluyor...")
+                        self.superadmin_paneli = SuperAdminPaneli(self.db)
+                        logger.info("SuperAdminPaneli oluşturuldu, gösteriliyor...")
+                        
+                        self.superadmin_paneli.show()
+                        logger.info("SuperAdminPaneli gösterildi")
+                        
+                        self.reject()
+                        return
+                    except Exception as panel_error:
+                        logger.error(f"SUPERADMIN paneli açılırken hata: {panel_error}", exc_info=True)
+                        QMessageBox.critical(self, "Panel Hatası", f"SUPERADMIN paneli açılamadı:\n\n{str(panel_error)}\n\nLütfen terminal loglarını kontrol edin.")
+                        return
 
                 # Diğer Roller (ADMIN, YONETICI, PERSONEL)
                 self.login_success.emit(result)
