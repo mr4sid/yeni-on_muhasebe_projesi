@@ -7894,7 +7894,7 @@ class GirisEkrani(QDialog):
                     return
                 
                 # Yeni personel doğrulama metodunu kullanıyoruz
-                result = self.db.personel_giris(firma_no, kullanici_adi, sifre)
+                result = self.db.personel_giris_yap(firma_no, kullanici_adi, sifre)
 
             # --- ORTAK SONUÇ DEĞERLENDİRME ---
             if isinstance(result, dict) and "access_token" in result:

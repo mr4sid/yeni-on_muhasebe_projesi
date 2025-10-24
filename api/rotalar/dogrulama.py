@@ -104,7 +104,12 @@ def authenticate_user(user_login: modeller.KullaniciLogin, db: Session = Depends
                 logger.error(f"Lisans durumu güncellenirken hata: {e}")
         
         # Lisans süresi bittiyse veya askıdaysa girişi engelle
-        if user.firma.lisans_durum in [modeller.LisansDurumEnum.SURESI_BITMIS, modeller.LisansDurumEnum.ASKIDA]:
+        if user.firma.lisans_durum == modeller.LisansDurumEnum.ASKIDA:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hesabınız SUPERADMIN tarafından askıya alınmıştır Lütfen bizim ile iletişime geçiniz."
+            )
+        if user.firma.lisans_durum == modeller.LisansDurumEnum.SURESI_BITMIS:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Lisans süreniz sona erdi. Lütfen lisansınızı yenileyiniz. (Son kullanım tarihi: {user.firma.lisans_bitis_tarihi})"
@@ -276,18 +281,37 @@ def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Ses
     # 1. Adım: Firma numarasını kullanarak ana veritabanından firmayı bul.
     firma = db_public.query(modeller.Firma).filter(modeller.Firma.firma_no == personel_bilgileri.firma_no).first()
 
-    if not firma:
+    # --- YENİ EKLENDİ: Personel girişi için lisans kontrolü ---
+    bugün = date.today()
+
+    # Lisans durumunu otomatik güncelle (master DB üzerinde)
+    if firma.lisans_bitis_tarihi < bugün and firma.lisans_durum != modeller.LisansDurumEnum.ASKIDA:
+        firma.lisans_durum = modeller.LisansDurumEnum.SURESI_BITMIS
+        try:
+            db_public.commit()
+        except Exception as e:
+            db_public.rollback()
+            logger.error(f"Personel girişi sırasında lisans durumu güncellenirken hata: {e}")
+
+    # Girişi engelle
+    if firma.lisans_durum == modeller.LisansDurumEnum.ASKIDA:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Bu firma numarasına sahip bir firma bulunamadı."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Firmanız SUPERADMIN tarafından askıya alınmıştır. Giriş yapamazsınız."
         )
+    if firma.lisans_durum == modeller.LisansDurumEnum.SURESI_BITMIS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Firmanızın lisans süresi sona ermiştir. Lütfen yöneticinizle iletişime geçin."
+        )
+    # --- LİSANS KONTROLÜ SONU ---
 
     # 2. Adım: Firmanın kendine özel veritabanına (tenant) bağlan.
     db_tenant = get_tenant_session_by_name(firma.db_adi)
 
     try:
         # 3. Adım: Firma veritabanında kullanıcı adını ara.
-        kullanici = db_tenant.query(modeller.Kullanici).filter(modeller.Kullanici.kullanici_adi == personel_bilgileri.kullanici_adi).first()
+        kullanici = db_tenant.query(modeller.Kullanici).filter(modeller.Kullanici.email == personel_bilgileri.kullanici_adi).first()
 
         # 4. Adım: Kullanıcıyı ve şifreyi doğrula.
         if not kullanici or not verify_password(personel_bilgileri.sifre, kullanici.sifre_hash):
@@ -300,21 +324,30 @@ def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Ses
         # 5. Adım: Başarılı giriş sonrası token oluştur.
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": kullanici.kullanici_adi, "rol": kullanici.rol, "id": kullanici.id, "firma_db": firma.db_adi},
+            data={"sub": kullanici.email, "rol": kullanici.rol, "id": kullanici.id, "firma_db": firma.db_adi},
             expires_delta=access_token_expires
         )
-        
+
+        # ad ve soyad birleştiriliyor (Yönetici girişiyle aynı)
+        ad_soyad = f"{kullanici.ad} {kullanici.soyad}".strip()
+
         # Arayüzün ihtiyaç duyacağı temel bilgileri de token ile birlikte geri döndürüyoruz.
         return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "kullanici_id": kullanici.id,
-            "kullanici_adi": kullanici.kullanici_adi,
-            "rol": kullanici.rol,
-            "sifre_hash": kullanici.sifre_hash,
-            "firma_no": firma.firma_no,
-            "firma_adi": firma.unvan
-        }
+                "access_token": access_token,
+                "token_type": "bearer",
+                # --- SEMALAR.TOKEN'in beklediği ek alanlar ---
+                "kullanici_id": kullanici.id,
+                # DÜZELTME: Sema 'kullanici_adi' beklediği için bu anahtarı kullanıyoruz,
+                #          değer olarak kullanici.email veriyoruz.
+                "kullanici_adi": kullanici.email,
+                "rol": kullanici.rol.value,
+                "sifre_hash": kullanici.sifre_hash,
+                "firma_no": firma.firma_no,
+                "firma_adi": firma.unvan,
+                "ad_soyad": ad_soyad
+                # NOT: Eğer semalar.Token 'email' alanını da ayrıca bekliyorsa, onu da ekleyebilirsiniz:
+                # "email": kullanici.email,
+            }
     finally:
         # Oturumu kapatarak kaynakların serbest bırakıldığından emin oluyoruz.
         db_tenant.close()

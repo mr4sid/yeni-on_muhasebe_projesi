@@ -7109,7 +7109,7 @@ class PersonelYonetimiPenceresi(QDialog):
         }
         
         # Rolü sadece değiştirilebilir durumda ise al
-        if not rol_combo.isDisabled():
+        if not rol_combo.isEnabled():
             personel_data["rol"] = rol_combo.currentText().lower()
         
         # Şifre varsa eklenir

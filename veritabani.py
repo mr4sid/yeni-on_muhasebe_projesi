@@ -238,39 +238,98 @@ class OnMuhasebe:
     def kullanici_dogrula(self, email: str, sifre: str) -> Optional[dict]:
         """
         Kullanıcıyı öncelikli olarak API üzerinden, başarısız olursa yerel veritabanı üzerinden doğrular.
+        Kilitlenme sorununu çözmek için güncellendi.
         """
+        # Kilitlenmeyi önlemek için her giriş denemesinde token'ı sıfırla
+        self.access_token = None
+        self.token_type = None
+        self.lokal_db.ayarlari_kaydet({"access_token": None, "token_type": None})
+
         # 1. Adım: Çevrimiçi modda API üzerinden doğrulamayı dene.
         if self.is_online:
-            logger.info("API üzerinden kullanıcı doğrulaması deneniyor...")
+            logger.info(f"API üzerinden kullanıcı doğrulaması deneniyor: {email}")
             try:
-                # KRİTİK DÜZELTME 1: API'ye email ve sifre gönderilir (API'nin beklediği format)
-                login_data = {"email": email, "sifre": sifre} 
-                response_data = self._make_api_request("POST", "/dogrulama/login", data=login_data)
+                # KİLİTLENME DÜZELTMESİ:
+                # _make_api_request kullanmıyoruz, çünkü o, var olan (belki de geçersiz)
+                # token'ı login isteğine ekleyerek 401 hatasına neden oluyor.
+                # Login isteği (token alma) için her zaman temiz bir istek göndermeliyiz.
+                login_data = {"email": email, "sifre": sifre}
+                url = f"{self.api_base_url}/dogrulama/login"
+
+                response = requests.post(
+                    url, 
+                    json=login_data, # API'niz Pydantic modeli (KullaniciLogin) beklediği için json=
+                    timeout=self.timeout
+                )
+
+                # API'den gelen hatayı (4xx, 5xx) fırlat
+                response.raise_for_status() 
+
+                response_data = response.json()
 
                 if response_data and "access_token" in response_data and "token_type" in response_data:
                     self.access_token = response_data["access_token"]
                     self.token_type = response_data["token_type"]
-                    
+
+                    # Token'ı yerel DB'ye kaydet
                     self.lokal_db.ayarlari_kaydet({
-                        "access_token": self.access_token, 
+                        "access_token": self.access_token,
                         "token_type": self.token_type
-                    }) 
-                    
+                    })
+
                     logger.info(f"Kullanıcı API üzerinden başarıyla doğrulandı: {email}")
+
+                    # Başarılı giriş sonrası yerel DB'yi de güncelleyelim (offline kullanım için)
+                    # (dogrulama.py'den sifre_hash'i de döndürmelisiniz)
+                    if "sifre_hash" in response_data:
+                        update_local_user_credentials(
+                            response_data.get('kullanici_id'),
+                            response_data.get('email'),
+                            response_data.get('sifre_hash'),
+                            response_data.get('rol')
+                        )
+
                     return response_data
                 else:
                     logger.warning("Kullanıcı doğrulama API üzerinden başarısız: Yanıt formatı hatalı veya token yok.")
-                    return None
-            except Exception as e:
-                logger.error(f"API isteği sırasında hata oluştu: {e}. Çevrimdışı moda geçiliyor.")
+                    raise Exception("API yanıtı hatalı (token yok).")
+
+            except requests.exceptions.HTTPError as http_err:
+                # API'den gelen 4xx ve 5xx hatalarını burada yakalıyoruz
+                self.is_online = True # Bağlantı var, ama API reddetti
+                status_code = http_err.response.status_code
+                try:
+                    detail = http_err.response.json().get('detail', 'Bilinmeyen API hatası')
+                except json.JSONDecodeError:
+                    detail = http_err.response.text
+
+                if status_code == 401:
+                    logger.warning(f"Giriş hatası (401): {detail}")
+                    raise Exception(detail) # Örn: "Hatalı e-posta veya şifre."
+                elif status_code == 403:
+                    logger.warning(f"Giriş engellendi (403): {detail}")
+                    raise Exception(detail) # Örn: "Hesabınız askıya alınmıştır."
+                else:
+                    logger.error(f"API isteği sırasında HTTP hatası oluştu: {status_code} - {detail}")
+                    raise Exception(f"Sunucu Hatası ({status_code}): {detail}")
+
+            except (ConnectionError, Timeout, RequestException) as e:
+                logger.error(f"API bağlantı hatası oluştu: {e}. Çevrimdışı moda geçiliyor.")
                 self.is_online = False
-                # Hata durumunda yerel veritabanına düşüşü sağla
+                # Sadece bağlantı hatası durumunda yerel veritabanına düş
                 return authenticate_offline_user(email, sifre)
+            except Exception as e:
+                # Diğer beklenmedik hatalar (örn: JSON parse hatası)
+                logger.error(f"Giriş sırasında beklenmedik bir hata oluştu: {e}", exc_info=True)
+                raise Exception(f"Bilinmeyen bir hata oluştu: {e}")
 
         # 2. Adım: Çevrimdışı modda yerel veritabanı üzerinden doğrula.
         else:
             logger.info("Çevrimdışı mod: Yerel veritabanı üzerinden kullanıcı doğrulaması deneniyor...")
-            return authenticate_offline_user(email, sifre)
+            offline_user = authenticate_offline_user(email, sifre)
+            if not offline_user:
+                raise Exception("Çevrimdışı giriş başarısız. Kullanıcı adı veya şifre hatalı.")
+            return offline_user
 
     def kullanici_dogrula_yerel(self, kullanici_adi, sifre):
         """
@@ -278,6 +337,89 @@ class OnMuhasebe:
         """
         logging.warning("kullanici_dogrula_yerel metodu artık DEPRECATED. Lütfen authenticate_offline_user kullanın.")
         return authenticate_offline_user(kullanici_adi, sifre) # Hatalı da olsa, geriye dönük uyumluluk için bırakıldı.
+    
+    def personel_giris_yap(self, firma_no: str, kullanici_adi: str, sifre: str) -> Optional[dict]:
+        """
+        Personel girişini API üzerinden doğrular. Çevrimdışı desteklemez.
+        """
+        # Personel girişi sadece online modda çalışır
+        if not self.is_online:
+            logger.warning("Personel girişi için çevrimiçi mod gereklidir.")
+            raise Exception("Personel girişi yalnızca çevrimiçi modda yapılabilir.")
+
+        # Her giriş denemesinde token'ı sıfırla (kullanici_dogrula'daki gibi)
+        self.access_token = None
+        self.token_type = None
+        self.lokal_db.ayarlari_kaydet({"access_token": None, "token_type": None})
+
+        logger.info(f"API üzerinden personel girişi deneniyor: FirmaNo={firma_no}, KullaniciAdi={kullanici_adi}")
+        try:
+            # _make_api_request kullanmıyoruz, çünkü bu bir token alma işlemi.
+            personel_login_data = {
+                "firma_no": firma_no,
+                "kullanici_adi": kullanici_adi,
+                "sifre": sifre
+            }
+            url = f"{self.api_base_url}/dogrulama/personel-giris"
+
+            response = requests.post(
+                url, 
+                json=personel_login_data, # API Pydantic modeli (PersonelGirisSema) bekliyor
+                timeout=self.timeout
+            )
+
+            response.raise_for_status() # API'den gelen 4xx/5xx hatalarını fırlat
+
+            response_data = response.json()
+
+            if response_data and "access_token" in response_data and "token_type" in response_data:
+                self.access_token = response_data["access_token"]
+                self.token_type = response_data["token_type"]
+
+                # Token'ı yerel DB'ye kaydet
+                self.lokal_db.ayarlari_kaydet({
+                    "access_token": self.access_token,
+                    "token_type": self.token_type
+                })
+
+                logger.info(f"Personel API üzerinden başarıyla doğrulandı: {kullanici_adi}")
+
+                # Personel için yerel DB güncellemesi (update_local_user_credentials)
+                # GEREKLİ Mİ? Personel bilgilerinin offline tutulması gerekiyor mu? Şimdilik eklemiyorum.
+                # Eğer gerekirse, response_data'dan gerekli bilgileri alıp update_local_user_credentials çağrılabilir.
+
+                return response_data
+            else:
+                logger.warning("Personel doğrulama API üzerinden başarısız: Yanıt formatı hatalı veya token yok.")
+                raise Exception("API yanıtı hatalı (token yok).")
+
+        except requests.exceptions.HTTPError as http_err:
+            status_code = http_err.response.status_code
+            try:
+                detail = http_err.response.json().get('detail', 'Bilinmeyen API hatası')
+            except json.JSONDecodeError:
+                detail = http_err.response.text
+
+            if status_code == 401:
+                logger.warning(f"Personel giriş hatası (401): {detail}")
+                raise Exception(detail) # Örn: "Kullanıcı adı veya şifre yanlış."
+            elif status_code == 403:
+                logger.warning(f"Personel giriş engellendi (403): {detail}")
+                raise Exception(detail) # Örn: "Firmanız askıya alınmıştır."
+            elif status_code == 404:
+                logger.warning(f"Personel giriş hatası (404): {detail}")
+                raise Exception(detail) # Örn: "Bu firma numarasına sahip bir firma bulunamadı."
+            else:
+                logger.error(f"Personel API isteği sırasında HTTP hatası: {status_code} - {detail}")
+                raise Exception(f"Sunucu Hatası ({status_code}): {detail}")
+
+        except (ConnectionError, Timeout, RequestException) as e:
+            logger.error(f"Personel API bağlantı hatası: {e}.")
+            self.is_online = False # Bağlantı koptu
+            raise Exception(f"Sunucuya bağlanılamadı: {e}")
+        except Exception as e:
+            logger.error(f"Personel girişi sırasında beklenmedik hata: {e}", exc_info=True)
+            raise Exception(f"Bilinmeyen bir hata oluştu: {e}")
     
     def _get_current_user(self) -> Optional[dict]:
         """

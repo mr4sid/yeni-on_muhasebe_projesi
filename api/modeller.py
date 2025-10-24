@@ -164,7 +164,19 @@ class Kullanici(VersionedMixin, Base):
     siparisler = relationship("Siparis", back_populates="kullanici")
     master_ayarlar = relationship("Ayarlar", back_populates="kullanici")
     
-class FirmaRead(BaseOrmModel): id: int; unvan: str; db_adi: str; lisans_baslangic_tarihi: date; lisans_bitis_tarihi: date; lisans_durum: LisansDurumEnum; olusturma_tarihi: datetime
+class FirmaRead(BaseOrmModel): 
+    id: int
+    unvan: str
+    db_adi: str
+    firma_no: Optional[str] = None # EKLENDİ
+    kurucu_personel_id: Optional[int] = None # EKLENDİ
+    lisans_baslangic_tarihi: date
+    lisans_bitis_tarihi: date
+    lisans_durum: LisansDurumEnum
+    olusturma_tarihi: datetime
+
+    # EKLENDİ: İlişkili kurucu personel modelini de okuyabilmesi için
+    kurucu_personel: Optional[KurucuPersonelRead] = None
 
 # Kullanıcı Modelleri (Pydantic)
 class KullaniciBase(BaseOrmModel): ad: str; soyad: str; email: EmailStr; telefon: Optional[str] = None; rol: Optional[RolEnum] = RolEnum.PERSONEL; aktif: Optional[bool] = True
@@ -186,6 +198,11 @@ class KullaniciRead(KullaniciBase):
     olusturma_tarihi: datetime
     son_giris_tarihi: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True, exclude={'sifre_hash'})
+
+class KurucuPersonelRead(BaseOrmModel):
+    """Firma listesi için gereken minimum kurucu bilgisi"""
+    telefon: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 class KullaniciUpdate(BaseModel):
     kullanici_adi: Optional[str] = None
