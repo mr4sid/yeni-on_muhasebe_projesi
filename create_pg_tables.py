@@ -1,25 +1,17 @@
-# create_pg_tables.py Dosyasının içeriği.
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy_utils import database_exists, create_database, drop_database # Buraya 'drop_database' eklendi
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy_utils import database_exists, create_database
 import logging
-from datetime import datetime
 
 # Loglama ayarları
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# FastAPI modelleri yerine doğrudan SQLAlchemy modellerini içe aktarın.
-# Bu script, API'ye bağımlı olmadan tabloları oluşturmalıdır.
-# Sizin api/semalar.py dosyanızdaki Base objesini ve tanımlanmış modelleri kullanmalıyız.
-from api.semalar import (
-    Base, Kullanici, Sirket, Musteri, Tedarikci, Stok, KasaBanka, Fatura,
-    FaturaKalemi, Siparis, SiparisKalemi, CariHareket, GelirGider,
-    UrunKategori, UrunMarka, UrunGrubu, UrunBirimi, Ulke,
-    GelirSiniflandirma, GiderSiniflandirma
-)
+# --- GÜNCELLEME: Doğru modeller 'api.modeller'den import ediliyor ---
+# 'api.semalar' Pydantic şemalarını içerir, 'api.modeller' ise SQLAlchemy tablolarını (Base) içerir.
+from api.modeller import Base, Firma
 
 # .env dosyasındaki ortam değişkenlerini yükle
 load_dotenv()
@@ -29,96 +21,91 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+DB_NAME = os.getenv("DB_NAME") # Bu 'on_muhasebe_master' olmalı
 
-# Veritabanı bağlantı bilgilerinin eksik olup olmadığını kontrol et
 if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
-    logger.error("Veritabanı bağlantı bilgileri .env dosyasından eksik veya hatalı. Lütfen .env dosyasını kontrol edin.")
-    raise ValueError("Veritabanı bağlantı bilgileri eksik. Tablolar oluşturulamıyor.")
+    logger.error("Veritabanı bağlantı bilgileri .env dosyasından eksik veya hatalı.")
+    raise ValueError("Veritabanı bağlantı bilgileri eksik.")
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+MASTER_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-def create_tables():
-    """Veritabanı tablolarını oluşturan fonksiyon."""
-    # PostgreSQL'in varsayılan "postgres" veritabanına bağlanarak
-    # drop/create işlemlerini yapacak URL'i oluşturun.
-    # Bu veritabanı genellikle her PostgreSQL kurulumunda bulunur.
-    temp_database_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/postgres"
+def update_master_schema(engine):
+    """
+    Ana veritabanı (master) şemasını GÜNCELLEr (veri kaybı olmadan).
+    Eksik tabloları (örn: Firma, Kullanici) ekler.
+    """
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info(f"Ana veritabanı '{DB_NAME}' şeması başarıyla oluşturuldu/güncellendi.")
+    except Exception as e:
+        logger.error(f"Ana veritabanı şeması güncellenirken hata: {e}", exc_info=True)
 
-    # Geçici bir engine oluşturun
-    temp_engine = create_engine(temp_database_url)
+def update_all_tenant_schemas(master_engine):
+    """
+    Tüm tenant veritabanlarını döngüye alır ve şemalarını GÜNCELLEr (veri kaybı olmadan).
+    Eksik tabloları (örn: kullanici_izinleri) ekler.
+    """
+    MasterSession = sessionmaker(bind=master_engine)
+    master_db = MasterSession()
 
     try:
-        # Veritabanı varsa silin
-        if database_exists(DATABASE_URL):
-            logger.info(f"Veritabanı '{DB_NAME}' bulunuyor, siliniyor...")
-            drop_database(DATABASE_URL)
-            logger.info(f"Veritabanı '{DB_NAME}' başarıyla silindi.")
+        logger.info("Tüm firmaların (tenant) listesi alınıyor...")
+        firmalar = master_db.query(Firma).all()
+        if not firmalar:
+            logger.warning("Güncellenecek tenant bulunamadı.")
+            return
+                
+        logger.info(f"Toplam {len(firmalar)} tenant veritabanı güncellenecek...")
+                
+        for firma in firmalar:
+            tenant_db_name = firma.db_adi
+            if not tenant_db_name:
+                logger.warning(f"Firma ID {firma.id} ({firma.unvan}) için 'db_adi' eksik, atlanıyor.")
+                continue
+
+            tenant_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{tenant_db_name}"
+
+            try:
+                tenant_engine = create_engine(tenant_url)
+                logger.info(f"'{tenant_db_name}' veritabanına bağlanılıyor...")
+                # YIKICI OLMAYAN GÜNCELLEME: Eksik tabloları ekler
+                Base.metadata.create_all(bind=tenant_engine)
+                logger.info(f"'{tenant_db_name}' şeması başarıyla oluşturuldu/güncellendi.")
+                tenant_engine.dispose()
+            except Exception as e:
+                # Veritabanı yoksa veya bağlantı hatası varsa logla ve devam et
+                logger.error(f"'{tenant_db_name}' güncellenirken HATA oluştu (Belki DB yoktur?): {e}")
         
-        # Veritabanını yeniden oluştur
-        logger.info(f"Veritabanı '{DB_NAME}' oluşturuluyor...")
-        create_database(DATABASE_URL)
-        logger.info(f"Veritabanı '{DB_NAME}' başarıyla oluşturuldu.")
+    finally:
+        master_db.close()
 
-        # Şimdi, asıl uygulamanın bağlanacağı veritabanına bir engine oluşturun.
-        engine = create_engine(DATABASE_URL)
+def main():
+    """Ana veritabanını ve tüm tenant veritabanlarını güvenli bir şekilde günceller."""
 
-        # Tüm tabloları oluştur
-        Base.metadata.create_all(bind=engine)
-        logger.info("Tüm veritabanı tabloları başarıyla oluşturuldu/güncellendi.")
-
-        # Varsayılan verileri ekle
-        Session = sessionmaker(bind=engine)
-        db = Session()
-        try:
-            logger.info("Varsayılan nitelik verileri ekleniyor...")
-
-            # Nitelikler
-            urun_birimleri = ["Adet", "Metre", "Kilogram", "Litre", "Kutu"]
-            ulkeler = ["Türkiye", "ABD", "Almanya", "Çin", "Fransa"]
-            gelir_siniflandirmalari = ["Satış Geliri", "Faiz Geliri", "Diğer Gelirler"]
-            gider_siniflandirmalari = ["Kira Gideri", "Personel Gideri", "Fatura Gideri", "Pazarlama Gideri"]
-
-            for ad in urun_birimleri: db.add(UrunBirimi(ad=ad))
-            for ad in ulkeler: db.add(Ulke(ad=ad))
-            for ad in gelir_siniflandirmalari: db.add(GelirSiniflandirma(ad=ad))
-            for ad in gider_siniflandirmalari: db.add(GiderSiniflandirma(ad=ad))
-            
-            # --- YENİ EKLENEN KOD ---
-            logger.info("Varsayılan cari ve kasa hesapları ekleniyor...")
-            
-            # Varsayılan Perakende Müşterisi ve Genel Tedarikçi'yi ekle
-            perakende_musteri = Musteri(ad="Perakende Müşterisi", kod="PERAKENDE_MUSTERI", aktif=True)
-            genel_tedarikci = Tedarikci(ad="Genel Tedarikçi", kod="GENEL_TEDARIKCI", aktif=True)
-            db.add(perakende_musteri)
-            db.add(genel_tedarikci)
-            db.commit() # ID'leri alabilmek için commit ediyoruz
-
-            # Varsayılan Nakit Kasa'yı ekle
-            nakit_kasa = KasaBanka(
-                hesap_adi="Nakit Kasa",
-                kod="NAKİT_KASA",
-                tip="KASA",
-                bakiye=0.0,
-                para_birimi="TL",
-                aktif=True,
-                varsayilan_odeme_turu="NAKİT"
-            )
-            db.add(nakit_kasa)
-            db.commit()
-
-            logger.info("Varsayılan cariler ve kasa hesabı başarıyla eklendi.")
-
-        except Exception as e:
-            logger.error(f"Varsayılan veriler eklenirken hata oluştu: {e}")
-            db.rollback()
-        finally:
-            db.close()
-
+    # 1. Ana Veritabanı (master) Engine'ini oluştur
+    try:
+        # Ana (master) veritabanının var olduğundan emin ol
+        if not database_exists(MASTER_DATABASE_URL):
+            logger.info(f"Ana veritabanı '{DB_NAME}' bulunamadı, oluşturuluyor...")
+            create_database(MASTER_DATABASE_URL)
+            logger.info(f"Ana veritabanı '{DB_NAME}' oluşturuldu.")
+                
+        master_engine = create_engine(MASTER_DATABASE_URL)
+        logger.info(f"Ana veritabanına '{DB_NAME}' bağlanıldı.")
     except Exception as e:
-        logger.critical(f"Veritabanı tabloları oluşturulurken hata: {e}")
-        raise
+        logger.critical(f"Ana veritabanına ({DB_NAME}) bağlanılamadı: {e}")
+        return
+
+    # 2. Ana Veritabanı Şemasını Güncelle (Veri kaybı olmadan)
+    update_master_schema(master_engine)
+
+    # 3. Tüm Tenant Veritabanı Şemalarını Güncelle (Veri kaybı olmadan)
+    update_all_tenant_schemas(master_engine)
+
+    master_engine.dispose()
+    logger.info("Tüm veritabanı şemaları güncellendi.")
+
 if __name__ == "__main__":
-    logger.info("create_pg_tables.py çalıştırılıyor...")
-    create_tables()
-    logger.info("create_pg_tables.py tamamlandı.")
+    logger.info("Veritabanı şema güncelleme script'i (GÜVENLİ) çalıştırılıyor...")
+    main()
+    logger.info("Script tamamlandı.")

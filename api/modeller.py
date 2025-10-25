@@ -136,7 +136,7 @@ class Kullanici(VersionedMixin, Base):
     soyad = Column(String(50))
     email = Column(String(100), unique=True)
     telefon = Column(String(20))
-
+    izinler = relationship("KullaniciIzinleri", back_populates="kullanici", cascade="all, delete-orphan")
     firma_id = Column(Integer, ForeignKey('firmalar.id', ondelete="SET NULL"), nullable=True) 
     rol = Column(Enum(RolEnum), nullable=False, default=RolEnum.PERSONEL)
     aktif = Column(Boolean, default=True)
@@ -163,6 +163,17 @@ class Kullanici(VersionedMixin, Base):
     stoklar = relationship("Stok", back_populates="kullanici")
     siparisler = relationship("Siparis", back_populates="kullanici")
     master_ayarlar = relationship("Ayarlar", back_populates="kullanici")
+    
+class KullaniciIzinleri(Base):
+    __tablename__ = 'kullanici_izinleri'
+    __table_args__ = (UniqueConstraint('kullanici_id', 'modul_adi', name='uix_kullanici_modul'),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    kullanici_id = Column(Integer, ForeignKey('kullanicilar.id', ondelete="CASCADE"), nullable=False)
+    modul_adi = Column(String(50), nullable=False) # Örn: "FATURALAR", "STOKLAR", "PERSONEL_YONETIMI"
+    erisebilir = Column(Boolean, default=False)
+
+    kullanici = relationship("Kullanici", back_populates="izinler")
     
 class FirmaRead(BaseOrmModel): 
     id: int

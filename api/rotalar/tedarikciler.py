@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from .. import modeller, guvenlik, veritabani
+from ..guvenlik import modul_yetki_kontrol
 from ..api_servisler import CariHesaplamaService
 from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
@@ -15,13 +16,10 @@ router = APIRouter(prefix="/tedarikciler", tags=["Tedarikçiler"])
 @router.post("/", response_model=modeller.TedarikciRead)
 def create_tedarikci(
     tedarikci: modeller.TedarikciCreate,
-    # KRİTİK DÜZELTME 3: Tenant DB bağlantısı kullanılacak
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER"))
 ):
-    # DÜZELTME 4: SADECE KODUN BENZERSİZLİĞİ KONTROL EDİLİR.
-    # DbT'de 'kullanici_id' artık Master'daki ID değil, Tenant DB'deki ID'dir (Genellikle 1).
-    db_tedarikci = modeller.Tedarikci(**tedarikci.model_dump(exclude={"kullanici_id"}), kullanici_id=1) 
+    db_tedarikci = modeller.Tedarikci(**tedarikci.model_dump(exclude={"kullanici_id"}), kullanici_id=current_user.get("id"))
     
     db.add(db_tedarikci)
     db.commit()
@@ -30,15 +28,13 @@ def create_tedarikci(
 
 @router.get("/", response_model=modeller.TedarikciListResponse)
 def read_tedarikciler(
-    # KRİTİK DÜZELTME 5: Tenant DB bağlantısı kullanılacak
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER")),
     skip: int = 0,
     limit: int = 25,
     arama: Optional[str] = None,
     aktif_durum: Optional[bool] = None
 ):
-    # KRİTİK DÜZELTME 6: Tenant DB'deyiz, IZOLASYON FİLTRESİ KALDIRILDI!
     query = db.query(modeller.Tedarikci) 
 
     if arama:
@@ -72,9 +68,8 @@ def read_tedarikciler(
 def read_tedarikci(
     tedarikci_id: int,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER"))
 ):
-    # KRİTİK DÜZELTME 8: Sadece ID filtresi kullanılır (İzolasyon DB seviyesinde)
     tedarikci = db.query(modeller.Tedarikci).filter(
         modeller.Tedarikci.id == tedarikci_id
     ).first()
@@ -92,7 +87,7 @@ def update_tedarikci(
     tedarikci_id: int,
     tedarikci_update: modeller.TedarikciUpdate,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER"))
 ):
     """
     ID'si verilen bir tedarikçi kaydını günceller.
@@ -135,9 +130,8 @@ def update_tedarikci(
 def delete_tedarikci(
     tedarikci_id: int,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER"))
 ):
-    # KRİTİK DÜZELTME 10: Sadece ID filtresi kullanılır
     db_tedarikci = db.query(modeller.Tedarikci).filter(
         modeller.Tedarikci.id == tedarikci_id
     ).first()
@@ -151,9 +145,8 @@ def delete_tedarikci(
 def get_net_bakiye_endpoint(
     tedarikci_id: int,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("TEDARIKCILER"))
 ):
-    # KRİTİK DÜZELTME 11: Sadece ID filtresi kullanılır
     tedarikci = db.query(modeller.Tedarikci).filter(
         modeller.Tedarikci.id == tedarikci_id
     ).first()

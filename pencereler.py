@@ -36,6 +36,18 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
+MODUL_LISTESI = [
+    ("FATURALAR", "Fatura İşlemleri"),
+    ("STOKLAR", "Stok Yönetimi"),
+    ("MUSTERILER", "Müşteri Yönetimi"),
+    ("TEDARIKCILER", "Tedarikçi Yönetimi"),
+    ("KASA_BANKA", "Kasa/Banka İşlemleri"),
+    ("RAPORLAR", "Raporlama Merkezi"),
+    # Kısıtlı modüller
+    ("PERSONEL_YONETIMI", "Personel Yönetimi (Yönetici/Admin Atayabilir)"),
+    ("AYARLAR", "Yönetici Ayarları (Sadece Admin Atayabilir)"),
+]
+
 def setup_numeric_entry(parent_app, entry_widget, allow_negative=False, decimal_places=2, max_value=None):
     validator = QDoubleValidator()
 
@@ -6894,7 +6906,7 @@ class PersonelYonetimiPenceresi(QDialog):
     def __init__(self, parent, db_manager):
         super().__init__(parent)
         self.db_manager = db_manager
-        
+        self.app = parent
         # Ana pencereden firma no bilgisi çekiliyor
         self.firma_no = getattr(parent, 'firma_no', "N/A")
         # Güncelleme sırasında kullanılacak versiyon numarasını saklamak için
@@ -7014,80 +7026,133 @@ class PersonelYonetimiPenceresi(QDialog):
 
 
     def _personel_formu_dialog(self, personel_data=None):
-        """Personel ekleme/düzenleme formunu açar."""
+        """Personel ekleme/düzenleme formunu açar. (İzinler eklendi)"""
         dialog = QDialog(self)
         is_duzenle = personel_data is not None
         dialog.setWindowTitle("Personel Düzenle" if is_duzenle else "Yeni Personel Oluştur")
         form_layout = QFormLayout(dialog)
-        
-        # Zorunlu alan etiketi için stil (Kırmızı *)
+
         zorunlu_stil = "<span style='color: red;'>*</span>"
-        
-        # 1. Input Alanları
-        ad_input = QLineEdit(dialog)
-        soyad_input = QLineEdit(dialog)
-        email_input = QLineEdit(dialog)
-        telefon_input = QLineEdit(dialog) # TELEFON ALANI EKLENDİ
-        rol_combo = QComboBox(dialog)
-        aktif_check = QCheckBox("Aktif", dialog)
-        aktif_check.setChecked(True)
-        sifre_input = QLineEdit(dialog)
-        sifre_input.setEchoMode(QLineEdit.Password)
-        
+
+        # 1. Input Alanları (Dialog'un özellikleri olarak tanımlıyoruz)
+        dialog.ad_input = QLineEdit(dialog)
+        dialog.soyad_input = QLineEdit(dialog)
+        dialog.email_input = QLineEdit(dialog)
+        dialog.telefon_input = QLineEdit(dialog)
+        dialog.rol_combo = QComboBox(dialog)
+        dialog.aktif_check = QCheckBox("Aktif", dialog)
+        dialog.aktif_check.setChecked(True)
+        dialog.sifre_input = QLineEdit(dialog)
+        dialog.sifre_input.setEchoMode(QLineEdit.Password)
+
         # 2. Rol Kısıtlamaları
         personel_id = personel_data.get('id', 0) if is_duzenle else 0
-        mevcut_rol = personel_data.get('rol', 'personel').lower() if is_duzenle else 'personel'
-        
-        # Ana Yönetici (ID=1) rolü değiştirilemez ve sadece kendi rolünü gösterir.
-        if personel_id == 1: 
-            rol_combo.setDisabled(True)
-            rol_combo.addItem(mevcut_rol.upper())
+        mevcut_rol = personel_data.get('rol', 'PERSONEL').upper() if is_duzenle else 'PERSONEL'
+
+        # Bu pencereyi açan YÖNETİCİ'nin veya ADMIN'in rolü
+        mevcut_kullanici_rolu = self.app.current_user.get("rol") 
+
+        # Kurucu ADMIN (ID=1) rolü değiştirilemez
+        if personel_id == 1:
+            dialog.rol_combo.setDisabled(True)
+            dialog.rol_combo.addItem("ADMIN")
         else:
-            # Diğer personeller için sadece personel ve yönetici seçenekleri
-            rol_combo.addItems(["personel", "yonetici"])
-        
+            # YONETICI sadece PERSONEL atayabilir
+            if mevcut_kullanici_rolu == "YONETICI":
+                dialog.rol_combo.addItem("PERSONEL")
+                dialog.rol_combo.setDisabled(True) # Sadece personel oluşturabilir, seçeneği değiştiremez
+            else: # ADMIN ise
+                dialog.rol_combo.addItems(["PERSONEL", "YONETICI", "ADMIN"])
+
         # 3. Verileri Doldur (Düzenleme Modu)
         if is_duzenle:
-            self.current_version = personel_data.get('version', 1) 
-            
-            ad_input.setText(personel_data.get('ad', ''))
-            soyad_input.setText(personel_data.get('soyad', ''))
-            email_input.setText(personel_data.get('email', ''))
-            telefon_input.setText(personel_data.get('telefon', '')) # TELEFON DOLDURMA
-            
+            self.current_version = personel_data.get('version', 1)
+            dialog.ad_input.setText(personel_data.get('ad', ''))
+            dialog.soyad_input.setText(personel_data.get('soyad', ''))
+            dialog.email_input.setText(personel_data.get('email', ''))
+            dialog.telefon_input.setText(personel_data.get('telefon', ''))
             if personel_id != 1:
-                 rol_combo.setCurrentText(mevcut_rol)
-            
-            aktif_check.setChecked(personel_data.get('aktif', True))
+                dialog.rol_combo.setCurrentText(mevcut_rol)
+            dialog.aktif_check.setChecked(personel_data.get('aktif', True))
 
-        # 4. Form Düzeni (Zorunlu Alan İşaretleri)
-        form_layout.addRow("Ad:" + zorunlu_stil, ad_input) 
-        form_layout.addRow("Soyad:", soyad_input)
-        form_layout.addRow("E-posta:" + zorunlu_stil, email_input) 
-        form_layout.addRow("Telefon:", telefon_input) 
-        form_layout.addRow("Rol:", rol_combo)
-        form_layout.addRow("Durum:", aktif_check)
-        form_layout.addRow("Şifre (Değiştirmek için doldurun):", sifre_input) 
-        
+        # 4. Form Düzeni
+        form_layout.addRow("Ad:" + zorunlu_stil, dialog.ad_input)
+        form_layout.addRow("Soyad:", dialog.soyad_input)
+        form_layout.addRow("E-posta:" + zorunlu_stil, dialog.email_input)
+        form_layout.addRow("Telefon:", dialog.telefon_input)
+        form_layout.addRow("Rol:", dialog.rol_combo)
+        form_layout.addRow("Durum:", dialog.aktif_check)
+        form_layout.addRow("Şifre (Değiştirmek için doldurun):", dialog.sifre_input)
+
+        # --- TALİMAT 2.5: İZİN CHECKBOXLARI ---
+        dialog.izin_group_box = QGroupBox("Modül İzinleri", dialog)
+        izin_layout = QVBoxLayout(dialog.izin_group_box)
+        dialog.izin_checkboxes = {} # Checkbox'ları saklamak için
+
+        # Düzenlenen/Oluşturulan kullanıcının seçili rolü
+        secili_rol_listesi = dialog.rol_combo.currentText().upper() 
+
+        for modul_key, modul_display in MODUL_LISTESI:
+            # KURAL 1: PERSONEL bu modülleri alamaz (UI'da gizle)
+            if secili_rol_listesi == "PERSONEL" and (modul_key == "PERSONEL_YONETIMI" or modul_key == "AYARLAR"):
+                continue
+
+            # KURAL 2: YONETICI bu modülleri atayamaz (UI'da gizle)
+            if mevcut_kullanici_rolu == "YONETICI" and (modul_key == "PERSONEL_YONETIMI" or modul_key == "AYARLAR"):
+                continue
+
+            cb = QCheckBox(modul_display, dialog.izin_group_box)
+
+            # KURAL 3: ADMIN ve YONETICI'nin temel modülleri varsayılan olarak seçili ve değiştirilemez
+            if secili_rol_listesi in ["ADMIN", "YONETICI"]:
+                if modul_key in ["FATURALAR", "STOKLAR", "MUSTERILER", "TEDARIKCILER"]:
+                    cb.setChecked(True)
+                    cb.setEnabled(False) # Admin veya Yöneticinin temel yetkileri kaldırılamaz
+
+            izin_layout.addWidget(cb)
+            dialog.izin_checkboxes[modul_key] = cb
+
+        form_layout.addRow(dialog.izin_group_box)
+        # --- TALİMAT 2.5 SONU ---
+
         # 5. Butonlar ve Bağlantılar
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
         form_layout.addRow(buttons)
+
+        # Lambda'yı temizledik, sadece 'dialog' ve 'personel_id' gönderiyoruz
         buttons.accepted.connect(lambda: self._personel_kaydet_ve_kapat(
-            dialog, is_duzenle, ad_input, soyad_input, email_input, telefon_input, rol_combo, sifre_input, aktif_check, personel_data.get('id') if is_duzenle else None
+            dialog, 
+            is_duzenle, 
+            personel_data.get('id') if is_duzenle else None
         ))
         buttons.rejected.connect(dialog.reject)
 
-        dialog.exec()        
+        # İzinleri Yükleme (Henüz API yok, bu yüzden burası boş)
+        if is_duzenle and personel_data:
+            personel_id = personel_data.get('id')
+            logger.info(f"Kullanıcı ID {personel_id} için izinler API'den yükleniyor...")
+
+            # Yeni API çağrısı
+            izinler_data_list, hata = self.db_manager.personel_izinleri_getir(personel_id)
+
+            if hata:
+                QMessageBox.warning(dialog, "İzin Hatası", f"Kullanıcının mevcut izinleri yüklenemedi:\n{hata}")
+            elif izinler_data_list:
+                logger.info(f"Alınan izinler: {izinler_data_list}")
+                for key, cb in dialog.izin_checkboxes.items():
+                    if key in izinler_data_list:
+                        cb.setChecked(True)
+
+        dialog.exec()
     
-    def _personel_kaydet_ve_kapat(self, dialog, is_duzenle, ad_input, soyad_input, email_input, telefon_input, rol_combo, sifre_input, aktif_check, personel_id):
+    def _personel_kaydet_ve_kapat(self, dialog, is_duzenle, personel_id):
         """Personel kaydetme ve güncelleme işlemini yapar, zorunlu alanları kontrol eder."""
-        
-        # 1. Veri Toplama ve Zorunluluk Kontrolü
-        ad = ad_input.text().strip()
-        email = email_input.text().strip()
-        sifre = sifre_input.text()
-        
-        # Zorunluluk Kontrolleri
+
+        # 1. Veri Toplama ve Zorunluluk Kontrolü (Dialog özelliklerinden)
+        ad = dialog.ad_input.text().strip()
+        email = dialog.email_input.text().strip()
+        sifre = dialog.sifre_input.text()
+
         if not ad:
             QMessageBox.warning(dialog, "Eksik Bilgi", "Ad alanı zorunludur. Lütfen doldurunuz.")
             return
@@ -7095,44 +7160,82 @@ class PersonelYonetimiPenceresi(QDialog):
             QMessageBox.warning(dialog, "Eksik Bilgi", "E-posta alanı zorunludur. Lütfen doldurunuz.")
             return
         if not is_duzenle and not sifre:
-             QMessageBox.warning(dialog, "Eksik Bilgi", "Yeni personel için şifre zorunludur.")
-             return
-
+            QMessageBox.warning(dialog, "Eksik Bilgi", "Yeni personel için şifre zorunludur.")
+            return
 
         # 2. Veri Hazırlama
         personel_data = {
             "ad": ad,
-            "soyad": soyad_input.text().strip(),
+            "soyad": dialog.soyad_input.text().strip(),
             "email": email,
-            "telefon": telefon_input.text().strip(), # TELEFON DAHİL EDİLDİ
-            "aktif": aktif_check.isChecked()
+            "telefon": dialog.telefon_input.text().strip(),
+            "aktif": dialog.aktif_check.isChecked(),
+            "rol": dialog.rol_combo.currentText().upper() # Rolü comboboxtan al
         }
-        
-        # Rolü sadece değiştirilebilir durumda ise al
-        if not rol_combo.isEnabled():
-            personel_data["rol"] = rol_combo.currentText().lower()
-        
-        # Şifre varsa eklenir
+
         if sifre:
             personel_data["sifre"] = sifre
 
-        # 3. API Çağrısı
-        if is_duzenle:
-            # Version eklenir
-            personel_data["version"] = self.current_version 
-            personel_data["rol"] = personel_data.get("rol", rol_combo.currentText().lower()) # Pasif rol alanındaki değeri koru
-            
-            basarili, mesaj = self.db_manager.personel_guncelle(personel_id, personel_data) 
-        else:
-            basarili, mesaj = self.db_manager.personel_olustur(personel_data)
+        # 3. API Çağrısı (Personel Oluştur/Güncelle)
+        yeni_personel_id = None
+        basarili = False
+        mesaj = ""
 
-        # 4. Sonuç
-        if basarili:
-            QMessageBox.information(self, "Başarılı", mesaj)
-            self.personel_listesini_yukle() 
-            dialog.accept() 
-        else:
-            QMessageBox.critical(self, "Hata", f"İşlem başarısız oldu:\n{mesaj}")
+        try:
+            if is_duzenle:
+                personel_data["version"] = self.current_version
+                response_data, hata_mesaji = self.db_manager.personel_guncelle(personel_id, personel_data)
+                if response_data:
+                    basarili = True
+                    mesaj = "Personel başarıyla güncellendi."
+                    yeni_personel_id = personel_id
+                else:
+                    basarili = False
+                    mesaj = hata_mesaji or "Bilinmeyen güncelleme hatası."
+            else:
+                # API'den dönen güncel yanıtı (KullaniciRead modeli) al
+                response_data, hata_mesaji = self.db_manager.personel_olustur(personel_data)
+                if response_data and isinstance(response_data, dict) and response_data.get('id'):
+                    basarili = True
+                    yeni_personel_id = response_data.get('id')
+                    mesaj = "Personel başarıyla oluşturuldu."
+                else:
+                    basarili = False
+                    mesaj = hata_mesaji or "Bilinmeyen oluşturma hatası."
+
+            # --- TALİMAT 2.5: İZİNLERİ KAYDETME KISMI ---
+            if basarili and yeni_personel_id:
+                izinler_data = {}
+                # Sadece görünür ve etkin olan checkbox'ların durumunu al
+                for key, cb in dialog.izin_checkboxes.items():
+                    if cb.isVisible() and cb.isEnabled():
+                        izinler_data[key] = cb.isChecked()
+                    # ADMIN/YONETICI için devre dışı bırakılan (ama seçili olan) temel izinleri de ekle
+                    elif cb.isVisible() and not cb.isEnabled() and cb.isChecked():
+                        izinler_data[key] = True
+
+                logger.info(f"Kullanıcı ID {yeni_personel_id} için izinler API'ye gönderiliyor: {izinler_data}")
+
+                # Yeni API çağrısı
+                izin_basari, izin_mesaj = self.db_manager.personel_izinleri_guncelle(yeni_personel_id, izinler_data)
+
+                if not izin_basari:
+                    # Ana işlem başarılı oldu ama izinler kaydedilemedi, kullanıcıyı uyar
+                    QMessageBox.warning(dialog, "İzin Hatası", f"Personel kaydedildi ancak izinleri güncellenirken hata oluştu:\n{izin_mesaj}")
+                else:
+                    mesaj += " ve izinler güncellendi." # Ana mesajı güncelle
+
+            # 5. Sonuç
+            if basarili:
+                QMessageBox.information(self, "Başarılı", mesaj)
+                self.personel_listesini_yukle()
+                dialog.accept()
+            else:
+                QMessageBox.critical(self, "Hata", f"İşlem başarısız oldu:\n{mesaj}")
+
+        except Exception as e:
+            logger.error(f"Personel kaydetme sırasında kritik hata: {e}", exc_info=True)
+            QMessageBox.critical(self, "Kritik Hata", f"İşlem sırasında beklenmedik bir hata oluştu: {e}")
 
     def _yeni_personel_ekle_dialog(self):
         """Yeni personel ekleme butonundan çağrılır."""

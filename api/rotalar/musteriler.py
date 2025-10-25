@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from .. import modeller, guvenlik, veritabani
+from ..guvenlik import modul_yetki_kontrol
 from ..api_servisler import CariHesaplamaService
 from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
@@ -15,14 +16,16 @@ router = APIRouter(prefix="/musteriler", tags=["Müşteriler"])
 @router.post("/", response_model=modeller.MusteriRead)
 def create_musteri(
     musteri: modeller.MusteriCreate,
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user),
+    # DÜZELTME: Yetkilendirme 'modul_yetki_kontrol' ile yapılıyor
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER")),
     db: Session = Depends(veritabani.get_db)
 ):
     try:
-        db_musteri = modeller.Musteri(**musteri.model_dump(exclude_unset=True), kullanici_id=1)
+        # DÜZELTME: kullanici_id=1 yerine token'dan gelen aktif kullanici_id kullanılmalı
+        db_musteri = modeller.Musteri(**musteri.model_dump(exclude_unset=True), kullanici_id=current_user.get("id"))
         db.add(db_musteri)
         db.flush()
-        
+                
         db_cari_hesap = modeller.CariHesap(
             cari_id=db_musteri.id, 
             cari_tip=modeller.CariTipiEnum.MUSTERI.value, 
@@ -32,11 +35,11 @@ def create_musteri(
         db.commit()
         db.refresh(db_musteri)
         return modeller.MusteriRead.model_validate(db_musteri, from_attributes=True)
-    
+
     except IntegrityError as e:
         db.rollback()
         if "unique_kod" in str(e) or "UniqueConstraint" in str(e):
-             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Müşteri kodu zaten mevcut.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Müşteri kodu zaten mevcut.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Müşteri kaydı oluşturulurken veritabanı hatası: {str(e)}")
     except Exception as e:
         db.rollback()
@@ -49,9 +52,8 @@ def read_musteriler(
     arama: Optional[str] = None,
     aktif_durum: Optional[bool] = None,
     db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
-    # KRİTİK DÜZELTME 4: IZOLASYON FILTRESI KALDIRILDI!
     query = db.query(modeller.Musteri)
     
     if arama:
@@ -103,9 +105,8 @@ def read_musteriler(
 def read_musteri(
     musteri_id: int,
     db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
-    # KRİTİK DÜZELTME 5: IZOLASYON FILTRESI KALDIRILDI!
     musteri = db.query(modeller.Musteri).filter(
         modeller.Musteri.id == musteri_id
     ).first()
@@ -134,7 +135,7 @@ def update_musteri(
     musteri_id: int,
     musteri_update: modeller.MusteriUpdate,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
     """
     ID'si verilen bir müşteri kaydını günceller.
@@ -177,9 +178,8 @@ def update_musteri(
 def delete_musteri(
     musteri_id: int,
     db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
-    # KRİTİK DÜZELTME 7: IZOLASYON FILTRESI KALDIRILDI!
     db_musteri = db.query(modeller.Musteri).filter(
         modeller.Musteri.id == musteri_id
     ).first()
@@ -202,9 +202,8 @@ def delete_musteri(
 @router.get("/kod_sirasi/next", response_model=modeller.NextCodeResponse)
 def get_next_musteri_kod(
     db: Session = Depends(veritabani.get_db), # Tenant DB kullanılır
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
-    # KRİTİK DÜZELTME 8: IZOLASYON FILTRESI KALDIRILDI!
     try:
         max_kod = db.query(modeller.Musteri.kod).order_by(modeller.Musteri.kod.desc()).first()
         
@@ -227,7 +226,7 @@ def get_next_musteri_kod(
 def get_musteri_net_bakiye(
     musteri_id: int,
     db: Session = Depends(veritabani.get_db),
-    current_user: modeller.KullaniciRead = Depends(guvenlik.get_current_user)
+    current_user: dict = Depends(guvenlik.modul_yetki_kontrol("MUSTERILER"))
 ):
     """Belirtilen müşterinin net cari bakiyesini hesaplar ve döndürür."""
     

@@ -92,7 +92,9 @@ class OnMuhasebe:
         self.current_user_id = None
         self.is_online = False
         self.timeout = 10
-
+        self.headers = {
+            "Content-Type": "application/json"
+        }
         # Lokal veritabanı bağlantısını başlat
         try:
             self.lokal_db = lokal_db_servisi 
@@ -103,7 +105,7 @@ class OnMuhasebe:
             raise
 
         self.check_online_status()
-        self._load_access_token()
+        
 
     def verify_password(self, plain_password, hashed_password):
         """
@@ -145,10 +147,9 @@ class OnMuhasebe:
             raise ValueError(f"Çevrimdışı mod: '{endpoint}' API isteği yapılamadı.")
 
         # Headers'a oturum açma tokenını ekleyin (eğer varsa)
-        api_headers = {"Content-Type": "application/json"}
-        if self.access_token:
-            api_headers["Authorization"] = f"Bearer {self.access_token}"
+        api_headers = self.headers.copy()
 
+        # Eğer isteğe özel (fonksiyondan gelen) header'lar varsa, ana header'ları güncelle
         if headers:
             api_headers.update(headers)
 
@@ -2226,16 +2227,24 @@ class OnMuhasebe:
             return False, f"API bağlantıları kapatılırken hata: {e}"
         
     def _load_access_token(self):
-        """Yerel veritabanından access token'ı yükler."""
+        """Yerel veritabanından access token'ı yükler ve self.headers'ı günceller."""
         try:
-            # Buradaki metod adlarını kendi lokal_db_servisi'nizdeki karşılıklarıyla doğrulayın
             ayarlar = self.lokal_db.ayarlari_yukle() 
             self.access_token = ayarlar.get("access_token")
-            self.token_type = ayarlar.get("token_type")
+            self.token_type = ayarlar.get("token_type", "Bearer") # Varsayılan "Bearer" olsun
+
             if self.access_token:
-                logger.info("Kalıcı depolamadan access token başarıyla yüklendi.")
+                # YENİ EKLENDİ: self.headers'ı güncelle
+                self.headers["Authorization"] = f"{self.token_type.capitalize()} {self.access_token}"
+                logger.info("Kalıcı depolamadan access token başarıyla yüklendi ve headers'a eklendi.")
+            else:
+                # YENİ EKLENDİ: Token yoksa header'dan kaldır
+                if "Authorization" in self.headers:
+                    del self.headers["Authorization"]
         except Exception as e:
             logger.warning(f"Access token yüklenirken hata oluştu: {e}")
+            if "Authorization" in self.headers:
+                del self.headers["Authorization"]
             pass
 
     def yeni_firma_olustur(self, firma_data: dict):
@@ -2356,6 +2365,46 @@ class OnMuhasebe:
             return {"error": "API Hatası", "detail": str(e)}
         except Exception as e:
             return {"error": "Genel Hata", "detail": str(e)}
+
+    def personel_izinleri_getir(self, personel_id: int):
+        """Bir personelin aktif modül izinlerini API'den çeker (Liste döndürür)."""
+        if not self.is_online or not self.access_token:
+            logger.warning("İzinleri getirmek için çevrimiçi mod ve yetkilendirme gereklidir.")
+            return None, "Çevrimdışı veya yetkisiz."
+        try:
+            response = self._make_api_request("GET", f"/yonetici/{personel_id}/izinleri-getir")
+            # Başarılı yanıt doğrudan bir liste olmalı: ["FATURALAR", "STOKLAR"]
+            if isinstance(response, list):
+                return response, None
+            else:
+                # Hata durumu (örn: {'detail': '...'})
+                hata_mesaji = response.get("detail", "Bilinmeyen API yanıtı")
+                logger.error(f"İzinler getirilirken API hatası: {hata_mesaji}")
+                return None, hata_mesaji
+        except Exception as e:
+            logger.error(f"Personel izinleri getirilirken beklenmedik hata: {e}", exc_info=True)
+            return None, f"Beklenmedik bir hata oluştu: {e}"
+
+    def personel_izinleri_guncelle(self, personel_id: int, izinler_data: dict):
+        """Bir personelin modül izinlerini API'ye gönderir."""
+        if not self.is_online or not self.access_token:
+            logger.warning("İzinleri güncellemek için çevrimiçi mod ve yetkilendirme gereklidir.")
+            return False, "Çevrimdışı veya yetkisiz."
+        try:
+            # API'ye gönderilecek veri formatı: {"izinler": {"FATURALAR": true, ...}}
+            data_payload = {"izinler": izinler_data}
+
+            response = self._make_api_request("PUT", f"/yonetici/{personel_id}/izinleri-guncelle", data=data_payload)
+
+            if response and "mesaj" in response:
+                return True, response.get("mesaj")
+            else:
+                hata_mesaji = response.get("detail", "Bilinmeyen API yanıtı")
+                logger.error(f"İzinler güncellenirken API hatası: {hata_mesaji}")
+                return False, hata_mesaji
+        except Exception as e:
+            logger.error(f"Personel izinleri güncellenirken beklenmedik hata: {e}", exc_info=True)
+            return False, f"Beklenmedik bir hata oluştu: {e}"
 
 # --- YENİ YARDIMCI FONKSİYONLAR (OnMuhasebe sınıfı dışına taşındı) ---
 # SessionLocal hatasını çözmek için, bu fonksiyonlar lokal_db_servisi.get_db() kullanacak.

@@ -1,4 +1,4 @@
-# api/guvenlik.py dosyasının tam içeriği
+# api/guvenlik.py dosyasının tam içeriği GÜNCEL İÇERİĞİ
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -105,3 +105,29 @@ def get_current_user_superadmin(current_user: modeller.KullaniciRead = Depends(g
             detail="Sadece SUPERADMIN yetkilidir."
         )
     return current_user
+
+def modul_yetki_kontrol(gerekli_modul: str):
+    """
+    Token'daki 'izinler' listesini kontrol eden yeni decorator. (Düzeltilmiş)
+    """
+    # DÜZELTME: 'get_current_user' (ORM objesi) yerine 'get_token_payload' (dict) kullanıyoruz.
+    def kontrol(payload: dict = Depends(get_token_payload)): 
+        kullanici_rol = payload.get("rol") # Artık .get() çalışmalı
+
+        # ADMIN (veya SUPERADMIN) her zaman yetkilidir
+        if kullanici_rol == "ADMIN" or kullanici_rol == "SUPERADMIN":
+            return payload
+
+        # Token'dan izin listesini al
+        kullanici_izinleri = payload.get("izinler", [])
+
+        # Gerekli modül kullanıcının izin listesinde yoksa
+        if gerekli_modul not in kullanici_izinleri:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Bu işlemi yapmak için '{gerekli_modul}' modülüne erişim yetkiniz yok."
+            )
+
+        return payload # Payload'u (sözlük) döndür
+
+    return kontrol

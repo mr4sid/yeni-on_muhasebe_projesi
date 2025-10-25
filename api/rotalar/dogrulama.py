@@ -321,12 +321,19 @@ def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Ses
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        izinler_query = db_tenant.query(modeller.KullaniciIzinleri.modul_adi).filter(
+            modeller.KullaniciIzinleri.kullanici_id == kullanici.id,
+            modeller.KullaniciIzinleri.erisebilir == True
+        ).all()
+        # Sorgu sonucunu basit bir listeye çevir: ["FATURALAR", "STOKLAR"]
+        izin_listesi = [izin[0] for izin in izinler_query]
+
         # 5. Adım: Başarılı giriş sonrası token oluştur.
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": kullanici.email, "rol": kullanici.rol, "id": kullanici.id, "firma_db": firma.db_adi},
+        data={"sub": kullanici.email, "rol": kullanici.rol.value, "id": kullanici.id, "tenant_db": firma.db_adi, "izinler": izin_listesi},
             expires_delta=access_token_expires
-        )
+            )
 
         # ad ve soyad birleştiriliyor (Yönetici girişiyle aynı)
         ad_soyad = f"{kullanici.ad} {kullanici.soyad}".strip()
@@ -335,18 +342,14 @@ def personel_giris(personel_bilgileri: semalar.PersonelGirisSema, db_public: Ses
         return {
                 "access_token": access_token,
                 "token_type": "bearer",
-                # --- SEMALAR.TOKEN'in beklediği ek alanlar ---
                 "kullanici_id": kullanici.id,
-                # DÜZELTME: Sema 'kullanici_adi' beklediği için bu anahtarı kullanıyoruz,
-                #          değer olarak kullanici.email veriyoruz.
                 "kullanici_adi": kullanici.email,
                 "rol": kullanici.rol.value,
                 "sifre_hash": kullanici.sifre_hash,
                 "firma_no": firma.firma_no,
                 "firma_adi": firma.unvan,
-                "ad_soyad": ad_soyad
-                # NOT: Eğer semalar.Token 'email' alanını da ayrıca bekliyorsa, onu da ekleyebilirsiniz:
-                # "email": kullanici.email,
+                "ad_soyad": ad_soyad,
+                "izinler": izin_listesi
             }
     finally:
         # Oturumu kapatarak kaynakların serbest bırakıldığından emin oluyoruz.

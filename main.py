@@ -1,4 +1,4 @@
-#main.py Dosyasının. Tam içeriği
+#main.py Dosyasının. Tam ve güncel içeriği
 import sys
 import os
 import json
@@ -294,6 +294,22 @@ class App(QMainWindow):
 
         if self.db_manager:
             self.db_manager.current_user_id = self.current_user_id
+
+            # Giriş ekranından alınan yeni token'ı ve tipi al
+            yeni_token = current_user.get("access_token")
+            token_tipi = current_user.get("token_type", "bearer")
+
+            if yeni_token:
+                # Yeni db_manager nesnesinin token'ını manuel olarak ayarla
+                self.db_manager.access_token = yeni_token
+                # veritabani.py _make_api_request'in kullandığı header'ları güncelle
+                if hasattr(self.db_manager, 'headers'):
+                    self.db_manager.headers["Authorization"] = f"{token_tipi.capitalize()} {yeni_token}"
+                    logger.info("Yeni token ana uygulama yöneticisine başarıyla aktarıldı.")
+                else:
+                    logger.warning("db_manager.headers özelliği bulunamadı, token header'a eklenemedi.")
+            else:
+                logger.warning("Giriş verisinde (user_data) 'access_token' bulunamadı.")
 
         self.tab_widget = QTabWidget(self)
         self.tab_widget.setTabsClosable(True)
@@ -895,10 +911,13 @@ if __name__ == "__main__":
         
         # Kritik bilgileri al
         kullanici_id = user_data.get("kullanici_id")
-        kullanici_adi = user_data.get("kullanici_adi")
+
+        # DÜZELTME: Hem 'email' (Admin/Superadmin girişi) hem de 'kullanici_adi' (Personel girişi) kontrol ediliyor.
+        email_veya_kullanici_adi = user_data.get("email") or user_data.get("kullanici_adi")
+
         sifre_hash = user_data.get("sifre_hash")
-        rol = user_data.get("rol", "user") # Rol yoksa varsayılan olarak "user" atandı
-        
+        rol = user_data.get("rol", "user") 
+
         # 1. Access Token'ı kaydet
         access_token = user_data.get("access_token")
         if access_token:
@@ -907,17 +926,19 @@ if __name__ == "__main__":
                 "access_token": access_token,
                 "token_type": user_data.get("token_type") # Token tipini de kaydet
             })
-            logger.info("Access Token başarıyla kalıcı olarak kaydedildi.")
-        
+        logger.info("Access Token başarıyla kalıcı olarak kaydedildi.")
+
         # 2. Hash kaydı (Çevrimdışı mod için)
-        if all([kullanici_id, kullanici_adi, sifre_hash]):
+        # DÜZELTME: 'kullanici_adi' yerine 'email_veya_kullanici_adi' kontrol ediliyor
+        if all([kullanici_id, email_veya_kullanici_adi, sifre_hash]):
             # update_local_user_credentials'a artık varsayılan bir rol bilgisi gönderiliyor.
             update_local_user_credentials(
-                kullanici_id, kullanici_adi, sifre_hash, rol
+                kullanici_id, email_veya_kullanici_adi, sifre_hash, rol
             )
-            logger.info(f"Kullanıcı kimlik bilgileri yerel veritabanına kaydedildi: {kullanici_adi}")
+            logger.info(f"Kullanıcı kimlik bilgileri yerel veritabanına kaydedildi: {email_veya_kullanici_adi}")
         else:
-             logger.warning(f"API yanıtı, yerel depolama için gerekli kritik bilgileri (ID:{kullanici_id}/Hash:{bool(sifre_hash)}/Ad:{kullanici_adi}) içermiyor. Kaydetme adımı atlandı.")
+            # DÜZELTME: Log mesajı güncellendi
+            logger.warning(f"API yanıtı, yerel depolama için gerekli kritik bilgileri (ID:{kullanici_id}/Hash:{bool(sifre_hash)}/Ad:{email_veya_kullanici_adi}) içermiyor. Kaydetme adımı atlandı.")
 
         # Kullanıcı verisini global sözlüğe kaydedin (Bu satırın çalışması Çökme 2'yi engeller)
         login_data["user_data"] = user_data
